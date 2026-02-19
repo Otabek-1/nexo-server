@@ -65,10 +65,9 @@ class TestService:
             test_type=test_data["testType"],
             creator_plan_snapshot=user_plan,
         )
-        await self.repo.add(row)
-        await self.db.flush()
         self._replace_participant_fields(row, test_data.get("participantFields", []))
         self._replace_questions(row, questions)
+        await self.repo.add(row)
         await self.db.commit()
 
         row = await self.get_test_or_404(row.id)
@@ -186,25 +185,24 @@ class TestService:
         }
 
     def _replace_participant_fields(self, test: Test, fields: list[dict]) -> None:
-        test.participant_fields.clear()
+        mapped_fields: list[ParticipantField] = []
         for idx, item in enumerate(fields):
-            test.participant_fields.append(
+            mapped_fields.append(
                 ParticipantField(
-                    test_id=test.id,
                     field_key=item["id"],
                     label=item["label"].strip(),
                     field_type=item["type"],
                     required=item.get("required", True),
                     locked=item.get("locked", False),
                     sort_order=idx,
-                )
+                ),
             )
+        test.participant_fields = mapped_fields
 
     def _replace_questions(self, test: Test, questions: list[dict]) -> None:
-        test.questions.clear()
+        mapped_questions: list[Question] = []
         for idx, item in enumerate(questions):
             q = Question(
-                test_id=test.id,
                 q_type=item["type"],
                 content_html=sanitize_rich_html(item["content"]),
                 points=float(item.get("points", 1) or 1),
@@ -214,5 +212,5 @@ class TestService:
             for opt_idx, opt in enumerate(item.get("options", [])):
                 if str(opt).strip():
                     q.options.append(QuestionOption(option_index=opt_idx, option_html=sanitize_rich_html(opt)))
-            test.questions.append(q)
-
+            mapped_questions.append(q)
+        test.questions = mapped_questions

@@ -16,7 +16,10 @@ class TestRepository:
         res = await self.db.execute(
             select(Test)
             .where(Test.creator_id == creator_id)
-            .options(selectinload(Test.questions))
+            .options(
+                selectinload(Test.questions),
+                selectinload(Test.participant_fields),
+            )
             .order_by(Test.created_at.desc())
         )
         return list(res.scalars().all())

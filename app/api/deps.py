@@ -16,8 +16,7 @@ bearer = HTTPBearer(auto_error=False)
 
 async def db_session() -> AsyncSession:
     async for s in get_db():
-        return s
-    raise RuntimeError("DB session unavailable")
+        yield s
 
 
 async def get_current_user(

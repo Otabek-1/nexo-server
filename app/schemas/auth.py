@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 
 class RegisterRequest(BaseModel):
@@ -30,6 +30,8 @@ class AuthTokens(BaseModel):
 
 
 class UserOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: UUID
     email: EmailStr
     full_name: str
@@ -39,4 +41,3 @@ class UserOut(BaseModel):
 class AuthResponse(BaseModel):
     user: UserOut
     tokens: AuthTokens
-

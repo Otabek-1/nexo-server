@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import inspect, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.constants import (
@@ -203,7 +203,11 @@ class SubmissionService:
         }
 
     def serialize_submission(self, row: Submission) -> dict:
-        manual = {str(g.question_id): float(g.score) for g in row.manual_grades}
+        state = inspect(row)
+        if "manual_grades" in state.unloaded:
+            manual = {}
+        else:
+            manual = {str(g.question_id): float(g.score) for g in row.manual_grades}
         return {
             "id": row.id,
             "testId": row.test_id,
