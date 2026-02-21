@@ -3,9 +3,8 @@ import json
 from uuid import UUID
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from app.core.constants import DEFAULT_FREE_LIMITS, PlanCode, QuestionType
 from app.models.domain import ParticipantField, Question, QuestionOption, Submission, Test
@@ -22,14 +21,17 @@ class TestService:
 
     async def list_creator_tests(self, creator_id: UUID) -> list[dict]:
         rows = await self.repo.list_creator_tests(creator_id)
+        test_ids = [int(row.id) for row in rows]
+        question_counts = await self.repo.question_counts_bulk(test_ids)
+        stats_map = await self.repo.submission_stats_bulk(test_ids)
         output = []
         for row in rows:
-            total, pending = await self.repo.stats(row.id)
+            total, pending = stats_map.get(int(row.id), (0, 0))
             output.append(
                 {
                     "id": row.id,
                     "testData": self._test_data(row),
-                    "questionsCount": len(row.questions),
+                    "questionsCount": question_counts.get(int(row.id), 0),
                     "creatorPlan": row.creator_plan_snapshot.value,
                     "createdAt": row.created_at,
                     "stats": {"submissionsCount": total, "pendingCount": pending},
@@ -45,8 +47,8 @@ class TestService:
 
     async def create_test(self, creator_id: UUID, payload: dict) -> dict:
         user_plan = await self.plan_service.get_user_plan(creator_id)
-        existing_tests = await self.repo.list_creator_tests(creator_id)
-        if user_plan == PlanCode.FREE and len(existing_tests) >= DEFAULT_FREE_LIMITS["activeTests"]:
+        existing_tests_count = await self.repo.count_creator_tests(creator_id)
+        if user_plan == PlanCode.FREE and existing_tests_count >= DEFAULT_FREE_LIMITS["activeTests"]:
             raise HTTPException(status_code=400, detail="Free activeTests limit reached")
 
         test_data = payload["testData"]
@@ -122,13 +124,13 @@ class TestService:
 
     async def validate_attempt(self, test_id: int, participant_value: str) -> dict:
         row = await self.get_test_or_404(test_id)
-        count_q = await self.db.execute(
-            select(Submission).where(
+        used_res = await self.db.execute(
+            select(func.count(Submission.id)).where(
                 Submission.test_id == test_id,
                 Submission.participant_attempt_value == participant_value.strip(),
             )
         )
-        used = len(count_q.scalars().all())
+        used = int(used_res.scalar() or 0)
         return {
             "allowed": used < row.attempts_count,
             "used_attempts": used,

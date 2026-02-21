@@ -43,12 +43,7 @@ class SubmissionService:
         if not attempt_value:
             raise HTTPException(status_code=400, detail="fullName required")
 
-        attempts_query = await self.db.execute(
-            select(Submission).where(
-                Submission.test_id == test_id, Submission.participant_attempt_value == attempt_value
-            )
-        )
-        attempts = len(attempts_query.scalars().all())
+        attempts = await self.repo.count_for_attempt_value(test_id=test_id, participant_attempt_value=attempt_value)
         if attempts >= test.attempts_count:
             raise HTTPException(status_code=400, detail="Attempt limit reached")
 
@@ -63,8 +58,8 @@ class SubmissionService:
                 return self.serialize_submission(current)
 
         if test.creator_plan_snapshot == PlanCode.FREE:
-            count = await self.db.execute(select(Submission).where(Submission.test_id == test_id))
-            if len(count.scalars().all()) >= DEFAULT_FREE_LIMITS["submissionsPerTest"]:
+            submissions_count = await self.repo.count_for_test(test_id)
+            if submissions_count >= DEFAULT_FREE_LIMITS["submissionsPerTest"]:
                 raise HTTPException(status_code=400, detail="Free submissionsPerTest limit reached")
 
         auto_score, auto_max, status = auto_score_submission(
@@ -166,7 +161,7 @@ class SubmissionService:
         return self.serialize_submission(submission)
 
     async def leaderboard(self, test_id: int) -> dict:
-        rows = await self.repo.list_for_test(test_id)
+        rows = await self.repo.list_for_test(test_id, include_manual_grades=False)
         ranked = sorted(
             [s for s in rows if s.status == SubmissionStatus.COMPLETED and s.final_score is not None],
             key=lambda x: (-float(x.final_score or 0), x.submitted_at),
