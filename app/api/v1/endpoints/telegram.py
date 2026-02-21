@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
+from json import JSONDecodeError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import db_session, get_current_user
@@ -30,6 +31,9 @@ async def telegram_webhook(secret: str, request: Request, db: AsyncSession = Dep
     if expected and secret != expected:
         raise HTTPException(status_code=403, detail="Invalid secret")
 
-    payload = await request.json()
+    try:
+        payload = await request.json()
+    except JSONDecodeError:
+        return {"ok": True, "ignored": True, "reason": "invalid_json"}
     bot = TelegramBotService(db)
     return await bot.handle_update(payload)
