@@ -21,6 +21,7 @@ class QuestionIn(BaseModel):
     options: list[str] = Field(default_factory=list)
     subQuestions: list[str] = Field(default_factory=list)
     twoPartCorrectAnswers: list[str] = Field(default_factory=list)
+    twoPartPoints: list[float] = Field(default_factory=list)
     points: float = 1
     correctAnswer: str = ""
 
@@ -75,6 +76,7 @@ class QuestionOut(BaseModel):
     options: list[str]
     subQuestions: list[str] = Field(default_factory=list)
     twoPartCorrectAnswers: list[str] = Field(default_factory=list)
+    twoPartPoints: list[float] = Field(default_factory=list)
     points: float
     correctAnswer: str
 

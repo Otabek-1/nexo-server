@@ -143,13 +143,16 @@ class TestService:
             options = [o.option_html for o in sorted(q.options, key=lambda x: x.option_index)]
             sub_questions: list[str] = []
             two_part_correct_answers: list[str] = []
+            two_part_points: list[float] = []
             correct_answer = q.correct_answer_text if include_correct else ""
 
             if q.q_type == QuestionType.TWO_PART_WRITTEN:
                 sub_questions = options[:2]
                 while len(sub_questions) < 2:
                     sub_questions.append("")
-                two_part_correct_answers = self._decode_two_part_answers(q.correct_answer_text) if include_correct else ["", ""]
+                first, second, first_points, second_points = self._decode_two_part_payload(q.correct_answer_text)
+                two_part_points = [first_points, second_points]
+                two_part_correct_answers = [first, second] if include_correct else ["", ""]
                 correct_answer = ""
 
             questions.append(
@@ -160,6 +163,7 @@ class TestService:
                     "options": options,
                     "subQuestions": sub_questions,
                     "twoPartCorrectAnswers": two_part_correct_answers,
+                    "twoPartPoints": two_part_points,
                     "points": q.points,
                     "correctAnswer": correct_answer,
                 }
@@ -239,10 +243,20 @@ class TestService:
                 two_part_answers = [str(value or "").strip() for value in item.get("twoPartCorrectAnswers", [])][:2]
                 while len(two_part_answers) < 2:
                     two_part_answers.append("")
+                two_part_points = [float(value or 1) for value in item.get("twoPartPoints", [])][:2]
+                while len(two_part_points) < 2:
+                    two_part_points.append(1.0)
+                two_part_points = [value if value > 0 else 1.0 for value in two_part_points]
                 q.correct_answer_text = json.dumps(
-                    {"first": two_part_answers[0], "second": two_part_answers[1]},
+                    {
+                        "first": two_part_answers[0],
+                        "second": two_part_answers[1],
+                        "firstPoints": two_part_points[0],
+                        "secondPoints": two_part_points[1],
+                    },
                     ensure_ascii=False,
                 )
+                q.points = two_part_points[0] + two_part_points[1]
             else:
                 for opt_idx, opt in enumerate(item.get("options", [])):
                     if str(opt).strip():
@@ -251,11 +265,17 @@ class TestService:
             mapped_questions.append(q)
         test.questions = mapped_questions
 
-    def _decode_two_part_answers(self, raw: str) -> list[str]:
+    def _decode_two_part_payload(self, raw: str) -> tuple[str, str, float, float]:
         try:
             payload = json.loads(str(raw or ""))
             first = str(payload.get("first", "")).strip()
             second = str(payload.get("second", "")).strip()
-            return [first, second]
+            first_points = float(payload.get("firstPoints", 1) or 1)
+            second_points = float(payload.get("secondPoints", 1) or 1)
+            if first_points <= 0:
+                first_points = 1.0
+            if second_points <= 0:
+                second_points = 1.0
+            return first, second, first_points, second_points
         except Exception:
-            return ["", ""]
+            return "", "", 1.0, 1.0

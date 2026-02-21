@@ -50,3 +50,20 @@ def test_auto_score_for_two_part_written():
     assert score == 1
     assert max_score == 1
     assert status == SubmissionStatus.COMPLETED
+
+
+def test_rasch_two_part_partial_points():
+    q = make_question(
+        QuestionType.TWO_PART_WRITTEN,
+        correct=json.dumps(
+            {"first": "alpha", "second": "beta", "firstPoints": 2.0, "secondPoints": 1.0}
+        ),
+        points=3,
+    )
+    answer = json.dumps({"first": "alpha", "second": "wrong"})
+    score, max_score, status = auto_score_submission(
+        [q], {"00000000-0000-0000-0000-000000000001": answer}, ScoringType.RASCH
+    )
+    assert score == 2.0
+    assert max_score == 3.0
+    assert status == SubmissionStatus.PENDING_REVIEW

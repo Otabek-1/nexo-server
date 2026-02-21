@@ -16,7 +16,7 @@ from app.models.domain import ManualGrade, Submission, Test
 from app.repositories.submission_repository import SubmissionRepository
 from app.services.plan_service import PlanService
 from app.services.rasch_service import estimate_rasch_1pl, theta_to_score_100
-from app.services.scoring_service import auto_score_submission, is_question_correct
+from app.services.scoring_service import auto_score_submission, is_question_correct, two_part_part_results
 from app.services.test_service import TestService
 
 
@@ -279,16 +279,36 @@ class SubmissionService:
                     row.review_by = reviewer_id
             return
 
-        item_ids = [str(q.id) for q in objective_questions]
+        objective_items: list[dict] = []
+        for q in objective_questions:
+            if q.q_type == QuestionType.TWO_PART_WRITTEN:
+                _, _, first_points, second_points = two_part_part_results(q, "")
+                objective_items.append(
+                    {"item_id": f"{q.id}:first", "question": q, "part": "first", "points": first_points}
+                )
+                objective_items.append(
+                    {"item_id": f"{q.id}:second", "question": q, "part": "second", "points": second_points}
+                )
+            else:
+                objective_items.append(
+                    {"item_id": str(q.id), "question": q, "part": None, "points": max(1.0, float(q.points))}
+                )
+
+        item_ids = [item["item_id"] for item in objective_items]
         submission_ids: list[UUID] = []
         matrix: list[list[int]] = []
 
         for row in all_rows:
             submission_ids.append(row.id)
             row_vector: list[int] = []
-            for q in objective_questions:
+            for item in objective_items:
+                q = item["question"]
                 ans = row.answers_json.get(str(q.id), "")
-                row_vector.append(1 if is_question_correct(q, ans) else 0)
+                if q.q_type == QuestionType.TWO_PART_WRITTEN:
+                    is_first, is_second, _, _ = two_part_part_results(q, ans)
+                    row_vector.append(1 if (is_first if item["part"] == "first" else is_second) else 0)
+                else:
+                    row_vector.append(1 if is_question_correct(q, ans) else 0)
             matrix.append(row_vector)
 
         estimate = estimate_rasch_1pl(
@@ -297,7 +317,7 @@ class SubmissionService:
             matrix=matrix,
         )
 
-        objective_points = sum(max(1.0, float(q.points)) for q in objective_questions)
+        objective_points = sum(float(item["points"]) for item in objective_items)
         manual_points = sum(
             max(1.0, float(q.points))
             for q in test.questions
