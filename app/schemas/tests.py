@@ -19,6 +19,8 @@ class QuestionIn(BaseModel):
     type: QuestionType
     content: str = Field(min_length=1)
     options: list[str] = Field(default_factory=list)
+    subQuestions: list[str] = Field(default_factory=list)
+    twoPartCorrectAnswers: list[str] = Field(default_factory=list)
     points: float = 1
     correctAnswer: str = ""
 
@@ -71,6 +73,8 @@ class QuestionOut(BaseModel):
     type: str
     content: str
     options: list[str]
+    subQuestions: list[str] = Field(default_factory=list)
+    twoPartCorrectAnswers: list[str] = Field(default_factory=list)
     points: float
     correctAnswer: str
 
@@ -101,4 +105,3 @@ class AttemptValidateOut(BaseModel):
     allowed: bool
     used_attempts: int
     max_attempts: int
-

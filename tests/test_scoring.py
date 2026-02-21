@@ -2,6 +2,7 @@ from app.core.constants import QuestionType, ScoringType, SubmissionStatus
 from app.models.domain import Question
 from app.services.scoring_service import auto_score_submission
 from uuid import UUID
+import json
 
 
 def make_question(q_type: QuestionType, correct: str = "", points: float = 1):
@@ -35,3 +36,17 @@ def test_manual_required_for_essay():
     assert score == 0
     assert max_score == 0
     assert status == SubmissionStatus.PENDING_REVIEW
+
+
+def test_auto_score_for_two_part_written():
+    q = make_question(
+        QuestionType.TWO_PART_WRITTEN,
+        correct=json.dumps({"first": "bo'shang", "second": "tamga"}),
+    )
+    answer = json.dumps({"first": "bo'shang", "second": "tamga"})
+    score, max_score, status = auto_score_submission(
+        [q], {"00000000-0000-0000-0000-000000000001": answer}, ScoringType.CLASSIC
+    )
+    assert score == 1
+    assert max_score == 1
+    assert status == SubmissionStatus.COMPLETED

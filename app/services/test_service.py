@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+import json
 from uuid import UUID
 
 from fastapi import HTTPException, status
@@ -137,14 +138,28 @@ class TestService:
     def serialize_test_detail(self, row: Test, include_correct: bool = True) -> dict:
         questions = []
         for q in sorted(row.questions, key=lambda item: item.sort_order):
+            options = [o.option_html for o in sorted(q.options, key=lambda x: x.option_index)]
+            sub_questions: list[str] = []
+            two_part_correct_answers: list[str] = []
+            correct_answer = q.correct_answer_text if include_correct else ""
+
+            if q.q_type == QuestionType.TWO_PART_WRITTEN:
+                sub_questions = options[:2]
+                while len(sub_questions) < 2:
+                    sub_questions.append("")
+                two_part_correct_answers = self._decode_two_part_answers(q.correct_answer_text) if include_correct else ["", ""]
+                correct_answer = ""
+
             questions.append(
                 {
                     "id": q.id,
                     "type": q.q_type.value,
                     "content": q.content_html,
-                    "options": [o.option_html for o in sorted(q.options, key=lambda x: x.option_index)],
+                    "options": options,
+                    "subQuestions": sub_questions,
+                    "twoPartCorrectAnswers": two_part_correct_answers,
                     "points": q.points,
-                    "correctAnswer": q.correct_answer_text if include_correct else "",
+                    "correctAnswer": correct_answer,
                 }
             )
         has_essay = any(q["type"] == QuestionType.ESSAY.value for q in questions)
@@ -202,15 +217,43 @@ class TestService:
     def _replace_questions(self, test: Test, questions: list[dict]) -> None:
         mapped_questions: list[Question] = []
         for idx, item in enumerate(questions):
+            question_type = item["type"]
+            correct_answer_text = str(item.get("correctAnswer", ""))
             q = Question(
-                q_type=item["type"],
+                q_type=question_type,
                 content_html=sanitize_rich_html(item["content"]),
                 points=float(item.get("points", 1) or 1),
-                correct_answer_text=str(item.get("correctAnswer", "")),
+                correct_answer_text=correct_answer_text,
                 sort_order=idx,
             )
-            for opt_idx, opt in enumerate(item.get("options", [])):
-                if str(opt).strip():
-                    q.options.append(QuestionOption(option_index=opt_idx, option_html=sanitize_rich_html(opt)))
+
+            if question_type == QuestionType.TWO_PART_WRITTEN:
+                sub_questions = [str(value or "").strip() for value in item.get("subQuestions", [])][:2]
+                while len(sub_questions) < 2:
+                    sub_questions.append("")
+                for opt_idx, text in enumerate(sub_questions):
+                    q.options.append(QuestionOption(option_index=opt_idx, option_html=sanitize_rich_html(text)))
+
+                two_part_answers = [str(value or "").strip() for value in item.get("twoPartCorrectAnswers", [])][:2]
+                while len(two_part_answers) < 2:
+                    two_part_answers.append("")
+                q.correct_answer_text = json.dumps(
+                    {"first": two_part_answers[0], "second": two_part_answers[1]},
+                    ensure_ascii=False,
+                )
+            else:
+                for opt_idx, opt in enumerate(item.get("options", [])):
+                    if str(opt).strip():
+                        q.options.append(QuestionOption(option_index=opt_idx, option_html=sanitize_rich_html(opt)))
+
             mapped_questions.append(q)
         test.questions = mapped_questions
+
+    def _decode_two_part_answers(self, raw: str) -> list[str]:
+        try:
+            payload = json.loads(str(raw or ""))
+            first = str(payload.get("first", "")).strip()
+            second = str(payload.get("second", "")).strip()
+            return [first, second]
+        except Exception:
+            return ["", ""]

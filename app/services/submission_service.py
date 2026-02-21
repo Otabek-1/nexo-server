@@ -16,7 +16,7 @@ from app.models.domain import ManualGrade, Submission, Test
 from app.repositories.submission_repository import SubmissionRepository
 from app.services.plan_service import PlanService
 from app.services.rasch_service import estimate_rasch_1pl, theta_to_score_100
-from app.services.scoring_service import auto_score_submission
+from app.services.scoring_service import auto_score_submission, is_question_correct
 from app.services.test_service import TestService
 
 
@@ -265,7 +265,11 @@ class SubmissionService:
         objective_questions = [
             q
             for q in test.questions
-            if q.q_type in {QuestionType.MULTIPLE_CHOICE, QuestionType.TRUE_FALSE}
+            if q.q_type in {
+                QuestionType.MULTIPLE_CHOICE,
+                QuestionType.TRUE_FALSE,
+                QuestionType.TWO_PART_WRITTEN,
+            }
         ]
 
         if not objective_questions:
@@ -289,7 +293,7 @@ class SubmissionService:
             row_vector: list[int] = []
             for q in objective_questions:
                 ans = row.answers_json.get(str(q.id), "")
-                row_vector.append(1 if str(ans) == str(q.correct_answer_text) else 0)
+                row_vector.append(1 if is_question_correct(q, ans) else 0)
             matrix.append(row_vector)
 
         estimate = estimate_rasch_1pl(

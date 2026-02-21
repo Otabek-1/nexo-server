@@ -25,6 +25,7 @@ class TestType(StrEnum):
 
 class QuestionType(StrEnum):
     SHORT_ANSWER = "short-answer"
+    TWO_PART_WRITTEN = "two-part-written"
     MULTIPLE_CHOICE = "multiple-choice"
     ESSAY = "essay"
     TRUE_FALSE = "true-false"
@@ -48,4 +49,3 @@ DEFAULT_FREE_LIMITS = {
     "submissionsPerTest": 100,
     "manualReviewRecent": 20,
 }
-
