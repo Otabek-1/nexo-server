@@ -53,6 +53,10 @@ class Settings(BaseSettings):
 
     sentry_dsn: str = ""
 
+    telegram_bot_token: str = ""
+    telegram_bot_username: str = "nexo_bot"
+    telegram_webhook_secret: str = ""
+
     @property
     def async_database_url(self) -> str:
         if self.database_url:

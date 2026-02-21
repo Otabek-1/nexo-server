@@ -8,8 +8,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.constants import DEFAULT_FREE_LIMITS, PlanCode, QuestionType
 from app.models.domain import ParticipantField, Question, QuestionOption, Submission, Test
+from app.repositories.registration_repository import RegistrationRepository
 from app.repositories.test_repository import TestRepository
 from app.services.plan_service import PlanService
+from app.utils.phone import normalize_phone_e164
 from app.utils.html import sanitize_rich_html
 
 
@@ -17,6 +19,7 @@ class TestService:
     def __init__(self, db: AsyncSession):
         self.db = db
         self.repo = TestRepository(db)
+        self.registration_repo = RegistrationRepository(db)
         self.plan_service = PlanService(db)
 
     async def list_creator_tests(self, creator_id: UUID) -> list[dict]:
@@ -64,6 +67,8 @@ class TestService:
             end_time=test_data["endTime"],
             duration_minutes=int(test_data["duration"]),
             attempts_count=int(test_data["attemptsCount"]),
+            attempts_enabled=bool(test_data.get("attemptsEnabled", False)),
+            registration_window_hours=test_data.get("registrationWindowHours"),
             scoring_type=test_data["scoringType"],
             test_type=test_data["testType"],
             creator_plan_snapshot=user_plan,
@@ -89,6 +94,8 @@ class TestService:
             row.end_time = test_data["endTime"]
             row.duration_minutes = int(test_data["duration"])
             row.attempts_count = int(test_data["attemptsCount"])
+            row.attempts_enabled = bool(test_data.get("attemptsEnabled", False))
+            row.registration_window_hours = test_data.get("registrationWindowHours")
             row.scoring_type = test_data["scoringType"]
             row.test_type = test_data["testType"]
             self._replace_participant_fields(row, test_data.get("participantFields", []))
@@ -124,10 +131,36 @@ class TestService:
 
     async def validate_attempt(self, test_id: int, participant_value: str) -> dict:
         row = await self.get_test_or_404(test_id)
+        if not row.attempts_enabled:
+            return {
+                "allowed": True,
+                "used_attempts": 0,
+                "max_attempts": row.attempts_count,
+                "reason": None,
+            }
+
+        phone = normalize_phone_e164(participant_value)
+        if not phone:
+            return {
+                "allowed": False,
+                "used_attempts": 0,
+                "max_attempts": row.attempts_count,
+                "reason": "Telefon raqam +998901234567 formatida bo'lishi kerak",
+            }
+
+        registration = await self.registration_repo.get_by_test_and_phone(test_id=row.id, phone_e164=phone)
+        if not registration:
+            return {
+                "allowed": False,
+                "used_attempts": 0,
+                "max_attempts": row.attempts_count,
+                "reason": "Bu telefon raqam test uchun Telegram botda ro'yxatdan o'tmagan",
+            }
+
         used_res = await self.db.execute(
             select(func.count(Submission.id)).where(
                 Submission.test_id == test_id,
-                Submission.participant_attempt_value == participant_value.strip(),
+                Submission.participant_attempt_value == phone,
             )
         )
         used = int(used_res.scalar() or 0)
@@ -135,6 +168,7 @@ class TestService:
             "allowed": used < row.attempts_count,
             "used_attempts": used,
             "max_attempts": row.attempts_count,
+            "reason": None if used < row.attempts_count else "Urinish limiti tugagan",
         }
 
     def serialize_test_detail(self, row: Test, include_correct: bool = True) -> dict:
@@ -191,6 +225,8 @@ class TestService:
             "endTime": row.end_time,
             "duration": row.duration_minutes,
             "attemptsCount": row.attempts_count,
+            "attemptsEnabled": row.attempts_enabled,
+            "registrationWindowHours": row.registration_window_hours,
             "scoringType": row.scoring_type.value,
             "testType": row.test_type.value,
             "participantFields": [

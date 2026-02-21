@@ -13,17 +13,20 @@ from app.core.constants import (
     SubmissionStatus,
 )
 from app.models.domain import ManualGrade, Submission, Test
+from app.repositories.registration_repository import RegistrationRepository
 from app.repositories.submission_repository import SubmissionRepository
 from app.services.plan_service import PlanService
 from app.services.rasch_service import estimate_rasch_1pl, theta_to_score_100
 from app.services.scoring_service import auto_score_submission, is_question_correct, two_part_part_results
 from app.services.test_service import TestService
+from app.utils.phone import normalize_phone_e164
 
 
 class SubmissionService:
     def __init__(self, db: AsyncSession):
         self.db = db
         self.repo = SubmissionRepository(db)
+        self.registration_repo = RegistrationRepository(db)
         self.test_service = TestService(db)
         self.plan_service = PlanService(db)
 
@@ -39,13 +42,27 @@ class SubmissionService:
         if now < test.start_time or now >= test.end_time:
             raise HTTPException(status_code=400, detail="Test not active")
 
-        attempt_value = str(participant_values.get("fullName") or "").strip()
-        if not attempt_value:
+        full_name = str(participant_values.get("fullName") or "").strip()
+        if not full_name:
             raise HTTPException(status_code=400, detail="fullName required")
 
-        attempts = await self.repo.count_for_attempt_value(test_id=test_id, participant_attempt_value=attempt_value)
-        if attempts >= test.attempts_count:
-            raise HTTPException(status_code=400, detail="Attempt limit reached")
+        if test.attempts_enabled:
+            phone = normalize_phone_e164(participant_values.get("phone", ""))
+            if not phone:
+                raise HTTPException(status_code=400, detail="Telefon raqam +998901234567 formatida bo'lishi kerak")
+
+            registration = await self.registration_repo.get_by_test_and_phone(test_id=test_id, phone_e164=phone)
+            if not registration:
+                raise HTTPException(status_code=400, detail="Bu telefon raqam test uchun ro'yxatdan o'tmagan")
+
+            attempt_value = phone
+            attempts = await self.repo.count_for_attempt_value(test_id=test_id, participant_attempt_value=attempt_value)
+            if attempts >= test.attempts_count:
+                raise HTTPException(status_code=400, detail="Attempt limit reached")
+            secondary = phone
+        else:
+            attempt_value = full_name
+            secondary = str(participant_values.get("phone", "")).strip()
 
         if idempotency_key:
             existing = await self.db.execute(
@@ -66,11 +83,9 @@ class SubmissionService:
             test.questions, answers, test.scoring_type
         )
         final_score = auto_score if status == SubmissionStatus.COMPLETED else None
-        secondary = str(participant_values.get("phone", "")).strip()
-
         row = Submission(
             test_id=test_id,
-            participant_full_name=attempt_value,
+            participant_full_name=full_name,
             participant_attempt_value=attempt_value,
             participant_secondary=secondary,
             participant_fields_json=participant_values,

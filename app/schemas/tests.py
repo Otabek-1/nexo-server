@@ -39,7 +39,9 @@ class TestDataIn(BaseModel):
     startTime: datetime
     endTime: datetime
     duration: int = Field(ge=1)
+    attemptsEnabled: bool = False
     attemptsCount: int = Field(ge=1)
+    registrationWindowHours: int | None = Field(default=None, ge=1)
     scoringType: ScoringType
     testType: TestType
     participantFields: list[ParticipantFieldIn]
@@ -107,3 +109,4 @@ class AttemptValidateOut(BaseModel):
     allowed: bool
     used_attempts: int
     max_attempts: int
+    reason: str | None = None

@@ -85,6 +85,8 @@ class Test(Base, TimestampMixin):
     end_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     duration_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
     attempts_count: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    attempts_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    registration_window_hours: Mapped[int | None] = mapped_column(Integer, nullable=True)
     scoring_type: Mapped[ScoringType] = mapped_column(
         Enum(ScoringType), default=ScoringType.CLASSIC, nullable=False
     )
@@ -100,6 +102,9 @@ class Test(Base, TimestampMixin):
         back_populates="test", cascade="all, delete-orphan"
     )
     submissions: Mapped[list["Submission"]] = relationship(
+        back_populates="test", cascade="all, delete-orphan"
+    )
+    registrations: Mapped[list["TestRegistration"]] = relationship(
         back_populates="test", cascade="all, delete-orphan"
     )
 
@@ -247,3 +252,31 @@ class RefreshToken(Base):
         DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
     )
 
+
+class TestRegistration(Base):
+    __tablename__ = "test_registrations"
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    test_id: Mapped[int] = mapped_column(ForeignKey("tests.id", ondelete="CASCADE"), index=True)
+    phone_e164: Mapped[str] = mapped_column(String(20), nullable=False)
+    telegram_user_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    telegram_username: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    telegram_full_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    registered_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
+    )
+
+    test: Mapped["Test"] = relationship(back_populates="registrations")
+
+    __table_args__ = (
+        UniqueConstraint("test_id", "phone_e164"),
+        UniqueConstraint("test_id", "telegram_user_id"),
+    )
+
+
+class TelegramRegistrationState(Base):
+    __tablename__ = "telegram_registration_states"
+    telegram_user_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    test_id: Mapped[int] = mapped_column(ForeignKey("tests.id", ondelete="CASCADE"), nullable=False, index=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
+    )
