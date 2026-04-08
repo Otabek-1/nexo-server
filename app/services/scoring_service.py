@@ -1,10 +1,39 @@
 import json
 import re
 
+from sympy import SympifyError, simplify
+from sympy.parsing.sympy_parser import (
+    T,
+    convert_xor,
+    function_exponentiation,
+    implicit_multiplication_application,
+    parse_expr,
+)
+
 from app.core.constants import QuestionType, ScoringType, SubmissionStatus
 from app.models.domain import Question
 
 APOSTROPHE_REGEX = re.compile(r"[\u02BB\u02BC\u2018\u2019`\u00B4]")
+MATH_SYMBOL_REGEX = re.compile(r"[\u221A\u221E\u03C0\u222B\u2264\u2265\u2260\u00B1]")
+MATH_REPLACEMENTS = {
+    "\u2212": "-",
+    "\u2013": "-",
+    "\u2014": "-",
+    "\u00D7": "*",
+    "\u00B7": "*",
+    "\u00F7": "/",
+    "\u2044": "/",
+    "\u03C0": "pi",
+    "\u221E": "oo",
+    "\u2264": "<=",
+    "\u2265": ">=",
+    "\u2260": "!=",
+}
+SYMPY_TRANSFORMATIONS = T[:] + (
+    implicit_multiplication_application,
+    convert_xor,
+    function_exponentiation,
+)
 
 
 def _normalize_text(value: str) -> str:
@@ -47,6 +76,62 @@ def _same_cell_answer(left: str, right: str) -> bool:
     a = _tokenize_cells(left)
     b = _tokenize_cells(right)
     return len(a) == len(b) and all(x == y for x, y in zip(a, b))
+
+
+def _normalize_math_text(value: str | int | float) -> str:
+    text = APOSTROPHE_REGEX.sub("'", str(value or "")).strip()
+    if not text:
+        return ""
+    text = text.replace("\u00a0", " ")
+    for source, target in MATH_REPLACEMENTS.items():
+        text = text.replace(source, target)
+    text = re.sub(r"\bln\b", "log", text, flags=re.IGNORECASE)
+    text = re.sub(r"\btg\b", "tan", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bctg\b", "cot", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bctan\b", "cot", text, flags=re.IGNORECASE)
+    text = re.sub(r"\barcsin\b", "asin", text, flags=re.IGNORECASE)
+    text = re.sub(r"\barccos\b", "acos", text, flags=re.IGNORECASE)
+    text = re.sub(r"\barctg\b", "atan", text, flags=re.IGNORECASE)
+    text = re.sub(r"\barctan\b", "atan", text, flags=re.IGNORECASE)
+    text = re.sub(r"\s+", " ", text)
+    text = re.sub(r"\u221A\s*\(([^()]+)\)", r"sqrt(\1)", text)
+    text = re.sub(r"\u221A\s*([A-Za-z0-9.]+)", r"sqrt(\1)", text)
+    return text.strip()
+
+
+def _looks_like_math(value: str) -> bool:
+    lowered = value.lower()
+    if any(token in lowered for token in ("sqrt", "sin", "cos", "tan", "cot", "log", "ln", "pi", "oo")):
+        return True
+    return bool(MATH_SYMBOL_REGEX.search(value) or re.search(r"[\^*/=()]", value))
+
+
+def _parse_math_expression(value: str):
+    normalized = _normalize_math_text(value)
+    if not normalized:
+        return None
+    return parse_expr(
+        normalized,
+        transformations=SYMPY_TRANSFORMATIONS,
+        evaluate=True,
+        local_dict={},
+    )
+
+
+def _same_math_answer(left: str, right: str) -> bool:
+    left_normalized = _normalize_math_text(left)
+    right_normalized = _normalize_math_text(right)
+    if not left_normalized or not right_normalized:
+        return left_normalized == right_normalized
+
+    try:
+        left_expr = _parse_math_expression(left_normalized)
+        right_expr = _parse_math_expression(right_normalized)
+        if left_expr is None or right_expr is None:
+            return left_normalized == right_normalized
+        return bool(simplify(left_expr - right_expr) == 0)
+    except (SympifyError, TypeError, ValueError):
+        return left_normalized == right_normalized
 
 
 def _parse_two_part_payload(raw: str | int | float) -> tuple[str, str]:
@@ -96,21 +181,36 @@ def _normalize_true_false_value(value: str | int | float) -> str:
     return raw
 
 
+def _is_two_part_question(question: Question) -> bool:
+    return question.q_type in {QuestionType.TWO_PART_WRITTEN, QuestionType.TWO_PART_MATH}
+
+
 def is_question_correct(question: Question, raw_answer: str | int | float) -> bool:
-    if question.q_type == QuestionType.TWO_PART_WRITTEN:
+    if _is_two_part_question(question):
         user_first, user_second = _parse_two_part_payload(raw_answer)
         correct_first, correct_second, _, _ = _parse_two_part_correct(question.correct_answer_text)
+        if question.q_type == QuestionType.TWO_PART_MATH:
+            return _same_math_answer(user_first, correct_first) and _same_math_answer(user_second, correct_second)
         return _same_cell_answer(user_first, correct_first) and _same_cell_answer(user_second, correct_second)
     if question.q_type == QuestionType.MULTIPLE_CHOICE:
         return _normalize_multiple_choice_value(raw_answer) == _normalize_multiple_choice_value(question.correct_answer_text)
     if question.q_type == QuestionType.TRUE_FALSE:
         return _normalize_true_false_value(raw_answer) == _normalize_true_false_value(question.correct_answer_text)
+    if _looks_like_math(str(raw_answer or "")) or _looks_like_math(str(question.correct_answer_text or "")):
+        return _same_math_answer(str(raw_answer or ""), str(question.correct_answer_text or ""))
     return str(raw_answer) == str(question.correct_answer_text)
 
 
 def two_part_part_results(question: Question, raw_answer: str | int | float) -> tuple[bool, bool, float, float]:
     user_first, user_second = _parse_two_part_payload(raw_answer)
     correct_first, correct_second, first_points, second_points = _parse_two_part_correct(question.correct_answer_text)
+    if question.q_type == QuestionType.TWO_PART_MATH:
+        return (
+            _same_math_answer(user_first, correct_first),
+            _same_math_answer(user_second, correct_second),
+            first_points,
+            second_points,
+        )
     return (
         _same_cell_answer(user_first, correct_first),
         _same_cell_answer(user_second, correct_second),
@@ -121,7 +221,7 @@ def two_part_part_results(question: Question, raw_answer: str | int | float) -> 
 
 def question_max_score(question: Question, scoring_type: ScoringType) -> float:
     if scoring_type == ScoringType.RASCH or question.q_type == QuestionType.ESSAY:
-        if question.q_type == QuestionType.TWO_PART_WRITTEN:
+        if _is_two_part_question(question):
             _, _, first_points, second_points = _parse_two_part_correct(question.correct_answer_text)
             return first_points + second_points
         return max(float(question.points), 1)
@@ -129,6 +229,7 @@ def question_max_score(question: Question, scoring_type: ScoringType) -> float:
         QuestionType.MULTIPLE_CHOICE,
         QuestionType.TRUE_FALSE,
         QuestionType.TWO_PART_WRITTEN,
+        QuestionType.TWO_PART_MATH,
     }:
         return 1
     return 0
@@ -148,7 +249,7 @@ def auto_score_submission(
         max_score = question_max_score(q, scoring_type)
         auto_max += max_score
         raw_answer = answers.get(str(q.id), "")
-        if q.q_type == QuestionType.TWO_PART_WRITTEN and scoring_type == ScoringType.RASCH:
+        if _is_two_part_question(q) and scoring_type == ScoringType.RASCH:
             is_first, is_second, first_points, second_points = two_part_part_results(q, raw_answer)
             if is_first:
                 auto_score += first_points

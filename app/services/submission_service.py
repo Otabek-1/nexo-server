@@ -1,5 +1,4 @@
 from datetime import UTC, datetime
-from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import HTTPException
@@ -21,6 +20,9 @@ from app.services.rasch_service import estimate_rasch_1pl, summarize_rasch_items
 from app.services.scoring_service import auto_score_submission, is_question_correct, two_part_part_results
 from app.services.test_service import TestService
 from app.utils.phone import normalize_phone_e164
+
+
+TWO_PART_TYPES = {QuestionType.TWO_PART_WRITTEN, QuestionType.TWO_PART_MATH}
 
 
 class SubmissionService:
@@ -282,6 +284,7 @@ class SubmissionService:
                 QuestionType.MULTIPLE_CHOICE,
                 QuestionType.TRUE_FALSE,
                 QuestionType.TWO_PART_WRITTEN,
+                QuestionType.TWO_PART_MATH,
             }
         ]
         if not objective_questions:
@@ -289,7 +292,7 @@ class SubmissionService:
 
         objective_items: list[dict] = []
         for q in objective_questions:
-            if q.q_type == QuestionType.TWO_PART_WRITTEN:
+            if q.q_type in TWO_PART_TYPES:
                 objective_items.append({"item_id": f"{q.id}:first", "question": q, "part": "first"})
                 objective_items.append({"item_id": f"{q.id}:second", "question": q, "part": "second"})
             else:
@@ -302,7 +305,7 @@ class SubmissionService:
             for item in objective_items:
                 q = item["question"]
                 ans = row.answers_json.get(str(q.id), "")
-                if q.q_type == QuestionType.TWO_PART_WRITTEN:
+                if q.q_type in TWO_PART_TYPES:
                     is_first, is_second, _, _ = two_part_part_results(q, ans)
                     row_vector.append(1 if (is_first if item["part"] == "first" else is_second) else 0)
                 else:
@@ -314,7 +317,7 @@ class SubmissionService:
 
         question_stats: list[dict] = []
         for q in objective_questions:
-            if q.q_type == QuestionType.TWO_PART_WRITTEN:
+            if q.q_type in TWO_PART_TYPES:
                 related_ids = [f"{q.id}:first", f"{q.id}:second"]
             else:
                 related_ids = [str(q.id)]
@@ -409,6 +412,7 @@ class SubmissionService:
                 QuestionType.MULTIPLE_CHOICE,
                 QuestionType.TRUE_FALSE,
                 QuestionType.TWO_PART_WRITTEN,
+                QuestionType.TWO_PART_MATH,
             }
         ]
 
@@ -426,7 +430,7 @@ class SubmissionService:
 
         objective_items: list[dict] = []
         for q in objective_questions:
-            if q.q_type == QuestionType.TWO_PART_WRITTEN:
+            if q.q_type in TWO_PART_TYPES:
                 objective_items.append(
                     {"item_id": f"{q.id}:first", "question": q, "part": "first"}
                 )
@@ -448,7 +452,7 @@ class SubmissionService:
             for item in objective_items:
                 q = item["question"]
                 ans = row.answers_json.get(str(q.id), "")
-                if q.q_type == QuestionType.TWO_PART_WRITTEN:
+                if q.q_type in TWO_PART_TYPES:
                     is_first, is_second, _, _ = two_part_part_results(q, ans)
                     row_vector.append(1 if (is_first if item["part"] == "first" else is_second) else 0)
                 else:

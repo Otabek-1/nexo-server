@@ -46,3 +46,22 @@ def test_rasch_rejects_non_unit_objective_points():
         assert "ball 1 bo'lishi kerak" in str(error.detail)
     else:
         raise AssertionError("Expected HTTPException for invalid Rasch points")
+
+
+def test_rasch_accepts_two_part_math_with_unit_part_points():
+    service = TestService(None)
+
+    questions = [
+        {
+            "type": QuestionType.TWO_PART_MATH.value,
+            "content": "Math",
+            "points": 2,
+            "subQuestions": ["a", "b"],
+            "twoPartCorrectAnswers": ["sqrt(2)", "x^2"],
+            "twoPartPoints": [1, 1],
+            "options": [],
+            "correctAnswer": "",
+        }
+    ]
+
+    service._validate_rasch_configuration(ScoringType.RASCH, questions)

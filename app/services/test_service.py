@@ -14,6 +14,8 @@ from app.services.plan_service import PlanService
 from app.utils.phone import normalize_phone_e164
 from app.utils.html import sanitize_rich_html
 
+TWO_PART_TYPES = {QuestionType.TWO_PART_WRITTEN, QuestionType.TWO_PART_MATH}
+
 
 class TestService:
     def __init__(self, db: AsyncSession):
@@ -189,7 +191,7 @@ class TestService:
             two_part_points: list[float] = []
             correct_answer = q.correct_answer_text if include_correct else ""
 
-            if q.q_type == QuestionType.TWO_PART_WRITTEN:
+            if q.q_type in TWO_PART_TYPES:
                 sub_questions = options[:2]
                 while len(sub_questions) < 2:
                     sub_questions.append("")
@@ -278,7 +280,7 @@ class TestService:
                 sort_order=idx,
             )
 
-            if question_type == QuestionType.TWO_PART_WRITTEN:
+            if question_type in TWO_PART_TYPES:
                 sub_questions = [str(value or "").strip() for value in item.get("subQuestions", [])][:2]
                 while len(sub_questions) < 2:
                     sub_questions.append("")
@@ -318,6 +320,7 @@ class TestService:
             QuestionType.MULTIPLE_CHOICE,
             QuestionType.TRUE_FALSE,
             QuestionType.TWO_PART_WRITTEN,
+            QuestionType.TWO_PART_MATH,
         }
 
         for question in questions:
@@ -325,7 +328,7 @@ class TestService:
                 question_type = question.q_type
                 question_points = float(question.points or 1)
                 two_part_points = None
-                if question.q_type == QuestionType.TWO_PART_WRITTEN:
+                if question.q_type in TWO_PART_TYPES:
                     _, _, first_points, second_points = self._decode_two_part_payload(question.correct_answer_text)
                     two_part_points = [first_points, second_points]
             else:
@@ -336,7 +339,7 @@ class TestService:
             if question_type not in supported_types:
                 raise HTTPException(
                     status_code=400,
-                    detail="Rasch tests faqat multiple-choice, true-false va two-part-written savollarni qo'llaydi",
+                    detail="Rasch tests faqat multiple-choice, true-false, two-part-written va two-part-math savollarni qo'llaydi",
                 )
 
             if question_type in {QuestionType.MULTIPLE_CHOICE, QuestionType.TRUE_FALSE} and abs(question_points - 1.0) > 1e-9:
@@ -345,14 +348,14 @@ class TestService:
                     detail="Rasch testsda multiple-choice va true-false savollar uchun ball 1 bo'lishi kerak",
                 )
 
-            if question_type == QuestionType.TWO_PART_WRITTEN:
+            if question_type in TWO_PART_TYPES:
                 normalized = [float(value or 1) for value in (two_part_points or [])[:2]]
                 while len(normalized) < 2:
                     normalized.append(1.0)
                 if any(abs(value - 1.0) > 1e-9 for value in normalized):
                     raise HTTPException(
                         status_code=400,
-                        detail="Rasch testsda two-part-written qismlarining har biri 1 ball bo'lishi kerak",
+                        detail="Rasch testsda two-part savol qismlarining har biri 1 ball bo'lishi kerak",
                     )
 
     def _decode_two_part_payload(self, raw: str) -> tuple[str, str, float, float]:

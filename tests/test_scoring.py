@@ -87,3 +87,17 @@ def test_true_false_accepts_normalized_variants():
     assert score == 1
     assert max_score == 1
     assert status == SubmissionStatus.COMPLETED
+
+
+def test_two_part_math_accepts_equivalent_forms():
+    q = make_question(
+        QuestionType.TWO_PART_MATH,
+        correct=json.dumps({"first": "sqrt(2)", "second": "x^2 + 2*x + 1"}),
+    )
+    answer = json.dumps({"first": "2^(1/2)", "second": "(x+1)^2"})
+    score, max_score, status = auto_score_submission(
+        [q], {"00000000-0000-0000-0000-000000000001": answer}, ScoringType.CLASSIC
+    )
+    assert score == 1
+    assert max_score == 1
+    assert status == SubmissionStatus.COMPLETED
