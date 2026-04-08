@@ -268,23 +268,37 @@ class TestService:
         test.participant_fields = mapped_fields
 
     def _replace_questions(self, test: Test, questions: list[dict]) -> None:
+        existing_questions_by_id = {str(question.id): question for question in test.questions}
         mapped_questions: list[Question] = []
         for idx, item in enumerate(questions):
             question_type = item["type"]
             correct_answer_text = str(item.get("correctAnswer", ""))
-            q = Question(
-                q_type=question_type,
-                content_html=sanitize_rich_html(item["content"]),
-                points=float(item.get("points", 1) or 1),
-                correct_answer_text=correct_answer_text,
-                sort_order=idx,
-            )
             raw_question_id = item.get("id")
+            q = None
             if raw_question_id:
-                try:
-                    q.id = UUID(str(raw_question_id))
-                except Exception:
-                    pass
+                q = existing_questions_by_id.get(str(raw_question_id))
+
+            if q is None:
+                q = Question(
+                    q_type=question_type,
+                    content_html=sanitize_rich_html(item["content"]),
+                    points=float(item.get("points", 1) or 1),
+                    correct_answer_text=correct_answer_text,
+                    sort_order=idx,
+                )
+                if raw_question_id:
+                    try:
+                        q.id = UUID(str(raw_question_id))
+                    except Exception:
+                        pass
+            else:
+                q.q_type = question_type
+                q.content_html = sanitize_rich_html(item["content"])
+                q.points = float(item.get("points", 1) or 1)
+                q.correct_answer_text = correct_answer_text
+                q.sort_order = idx
+
+            q.options = []
 
             if question_type in TWO_PART_TYPES:
                 sub_questions = [str(value or "").strip() for value in item.get("subQuestions", [])][:2]
