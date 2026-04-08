@@ -9,6 +9,15 @@ class RaschEstimate:
     difficulty_by_item: dict[str, float]
 
 
+@dataclass
+class RaschItemStat:
+    item_id: str
+    correct_count: int
+    incorrect_count: int
+    total_count: int
+    accuracy: float
+
+
 def _sigmoid(x: float) -> float:
     if x >= 0:
         z = math.exp(-x)
@@ -95,3 +104,27 @@ def estimate_rasch_1pl(
 def theta_to_score_100(theta: float) -> float:
     return max(0.0, min(100.0, 100.0 * _sigmoid(theta)))
 
+
+def summarize_rasch_items(item_ids: list[str], matrix: list[list[int]]) -> list[RaschItemStat]:
+    if not item_ids or not matrix:
+        return []
+
+    item_stats: list[RaschItemStat] = []
+    total_rows = len(matrix)
+
+    for index, item_id in enumerate(item_ids):
+        correct_count = sum(1 for row in matrix if index < len(row) and int(row[index]) == 1)
+        incorrect_count = max(total_rows - correct_count, 0)
+        total_count = correct_count + incorrect_count
+        accuracy = (correct_count / total_count) if total_count > 0 else 0.0
+        item_stats.append(
+            RaschItemStat(
+                item_id=item_id,
+                correct_count=correct_count,
+                incorrect_count=incorrect_count,
+                total_count=total_count,
+                accuracy=accuracy,
+            )
+        )
+
+    return item_stats

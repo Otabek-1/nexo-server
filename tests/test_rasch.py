@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from app.services.rasch_service import estimate_rasch_1pl, theta_to_score_100
+from app.services.rasch_service import estimate_rasch_1pl, summarize_rasch_items, theta_to_score_100
 
 
 def test_rasch_estimation_orders_participants():
@@ -42,3 +42,18 @@ def test_rasch_item_difficulty_direction():
     est = estimate_rasch_1pl(submission_ids=submission_ids, item_ids=item_ids, matrix=matrix)
     assert est.difficulty_by_item["hard"] > est.difficulty_by_item["easy"]
 
+
+def test_rasch_item_summary_counts():
+    item_ids = ["i1", "i2", "i3"]
+    matrix = [
+        [1, 0, 1],
+        [1, 1, 0],
+        [0, 1, 0],
+    ]
+
+    stats = summarize_rasch_items(item_ids=item_ids, matrix=matrix)
+
+    assert [item.correct_count for item in stats] == [2, 2, 1]
+    assert [item.incorrect_count for item in stats] == [1, 1, 2]
+    assert stats[0].accuracy == 2 / 3
+    assert stats[2].accuracy == 1 / 3

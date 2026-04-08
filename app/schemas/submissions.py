@@ -52,8 +52,26 @@ class PendingItem(BaseModel):
     status: str
 
 
+class RaschQuestionStat(BaseModel):
+    questionId: str
+    label: str
+    contentPreview: str
+    correctCount: int
+    incorrectCount: int
+    totalCount: int
+    accuracy: float
+    itemCount: int
+
+
+class RaschStatsOut(BaseModel):
+    totalSubmissions: int
+    easiestQuestion: RaschQuestionStat | None = None
+    hardestQuestion: RaschQuestionStat | None = None
+    questionStats: list[RaschQuestionStat] = Field(default_factory=list)
+
+
 class LeaderboardResponse(BaseModel):
     ranked: list[LeaderboardItem]
     pending: list[PendingItem]
     stats: dict[str, int]
-
+    raschStats: RaschStatsOut | None = None

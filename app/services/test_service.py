@@ -62,7 +62,7 @@ class TestService:
         row = Test(
             creator_id=creator_id,
             title=test_data["title"].strip(),
-            description=test_data.get("description", ""),
+            description=sanitize_rich_html(test_data.get("description", "")),
             start_time=test_data["startTime"],
             end_time=test_data["endTime"],
             duration_minutes=int(test_data["duration"]),
@@ -89,7 +89,7 @@ class TestService:
         questions = payload.get("questions")
         if test_data:
             row.title = test_data["title"].strip()
-            row.description = test_data.get("description", "")
+            row.description = sanitize_rich_html(test_data.get("description", ""))
             row.start_time = test_data["startTime"]
             row.end_time = test_data["endTime"]
             row.duration_minutes = int(test_data["duration"])

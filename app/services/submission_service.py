@@ -16,7 +16,7 @@ from app.models.domain import ManualGrade, Submission, Test
 from app.repositories.registration_repository import RegistrationRepository
 from app.repositories.submission_repository import SubmissionRepository
 from app.services.plan_service import PlanService
-from app.services.rasch_service import estimate_rasch_1pl, theta_to_score_100
+from app.services.rasch_service import estimate_rasch_1pl, summarize_rasch_items, theta_to_score_100
 from app.services.scoring_service import auto_score_submission, is_question_correct, two_part_part_results
 from app.services.test_service import TestService
 from app.utils.phone import normalize_phone_e164
@@ -177,6 +177,7 @@ class SubmissionService:
 
     async def leaderboard(self, test_id: int) -> dict:
         rows = await self.repo.list_for_test(test_id, include_manual_grades=False)
+        test = await self.test_service.get_test_or_404(test_id)
         ranked = sorted(
             [s for s in rows if s.status == SubmissionStatus.COMPLETED and s.final_score is not None],
             key=lambda x: (-float(x.final_score or 0), x.submitted_at),
@@ -210,6 +211,7 @@ class SubmissionService:
                 "pending": len(pending),
                 "total": len(rows),
             },
+            "raschStats": self._build_rasch_stats(test=test, rows=rows),
         }
 
     def serialize_submission(self, row: Submission) -> dict:
@@ -263,6 +265,111 @@ class SubmissionService:
             total += max(0.0, min(max_points, grade_map[qid]))
 
         return total, total_max, all_graded
+
+    def _build_rasch_stats(self, test: Test, rows: list[Submission]) -> dict | None:
+        if test.scoring_type != ScoringType.RASCH or not rows:
+            return None
+
+        objective_questions = [
+            q
+            for q in test.questions
+            if q.q_type in {
+                QuestionType.MULTIPLE_CHOICE,
+                QuestionType.TRUE_FALSE,
+                QuestionType.TWO_PART_WRITTEN,
+            }
+        ]
+        if not objective_questions:
+            return None
+
+        objective_items: list[dict] = []
+        for q in objective_questions:
+            if q.q_type == QuestionType.TWO_PART_WRITTEN:
+                objective_items.append({"item_id": f"{q.id}:first", "question": q, "part": "first"})
+                objective_items.append({"item_id": f"{q.id}:second", "question": q, "part": "second"})
+            else:
+                objective_items.append({"item_id": str(q.id), "question": q, "part": None})
+
+        item_ids = [item["item_id"] for item in objective_items]
+        matrix: list[list[int]] = []
+        for row in rows:
+            row_vector: list[int] = []
+            for item in objective_items:
+                q = item["question"]
+                ans = row.answers_json.get(str(q.id), "")
+                if q.q_type == QuestionType.TWO_PART_WRITTEN:
+                    is_first, is_second, _, _ = two_part_part_results(q, ans)
+                    row_vector.append(1 if (is_first if item["part"] == "first" else is_second) else 0)
+                else:
+                    row_vector.append(1 if is_question_correct(q, ans) else 0)
+            matrix.append(row_vector)
+
+        item_stats = summarize_rasch_items(item_ids=item_ids, matrix=matrix)
+        item_stat_map = {stat.item_id: stat for stat in item_stats}
+
+        question_stats: list[dict] = []
+        for q in objective_questions:
+            if q.q_type == QuestionType.TWO_PART_WRITTEN:
+                related_ids = [f"{q.id}:first", f"{q.id}:second"]
+            else:
+                related_ids = [str(q.id)]
+            related_stats = [item_stat_map[item_id] for item_id in related_ids if item_id in item_stat_map]
+            if not related_stats:
+                continue
+            correct_count = sum(item.correct_count for item in related_stats)
+            incorrect_count = sum(item.incorrect_count for item in related_stats)
+            total_count = sum(item.total_count for item in related_stats)
+            accuracy = (correct_count / total_count) if total_count > 0 else 0.0
+            question_stats.append(
+                {
+                    "questionId": str(q.id),
+                    "label": f"{q.sort_order + 1}-savol",
+                    "contentPreview": self._question_preview(q.content_html),
+                    "correctCount": correct_count,
+                    "incorrectCount": incorrect_count,
+                    "totalCount": total_count,
+                    "accuracy": round(accuracy, 4),
+                    "itemCount": len(related_stats),
+                }
+            )
+
+        if not question_stats:
+            return None
+
+        ordered = sorted(
+            question_stats,
+            key=lambda item: (-float(item["accuracy"]), -int(item["correctCount"]), item["label"]),
+        )
+        reverse_ordered = sorted(
+            question_stats,
+            key=lambda item: (float(item["accuracy"]), -int(item["incorrectCount"]), item["label"]),
+        )
+
+        return {
+            "totalSubmissions": len(rows),
+            "easiestQuestion": ordered[0],
+            "hardestQuestion": reverse_ordered[0],
+            "questionStats": question_stats,
+        }
+
+    def _question_preview(self, html: str, limit: int = 140) -> str:
+        text = " ".join(str(html or "").replace("<", " <").replace(">", "> ").split())
+        cleaned = []
+        inside_tag = False
+        for ch in text:
+            if ch == "<":
+                inside_tag = True
+                continue
+            if ch == ">":
+                inside_tag = False
+                cleaned.append(" ")
+                continue
+            if not inside_tag:
+                cleaned.append(ch)
+        plain = " ".join("".join(cleaned).split())
+        if len(plain) <= limit:
+            return plain
+        return f"{plain[: max(limit - 1, 0)].rstrip()}…"
 
     async def _finalize_rasch_for_test(
         self,

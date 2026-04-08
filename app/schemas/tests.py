@@ -35,7 +35,7 @@ class QuestionIn(BaseModel):
 
 class TestDataIn(BaseModel):
     title: str = Field(min_length=1, max_length=200)
-    description: str = Field(default="", max_length=5000)
+    description: str = Field(default="", max_length=30000)
     startTime: datetime
     endTime: datetime
     duration: int = Field(ge=1)
