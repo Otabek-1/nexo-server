@@ -185,6 +185,27 @@ def _is_two_part_question(question: Question) -> bool:
     return question.q_type in {QuestionType.TWO_PART_WRITTEN, QuestionType.TWO_PART_MATH}
 
 
+def canonicalize_answers(
+    questions: list[Question], answers: dict[str, str | int | float]
+) -> tuple[dict[str, str | int | float], bool]:
+    normalized_answers = {str(key): value for key, value in (answers or {}).items()}
+    ordered_questions = sorted(questions, key=lambda item: item.sort_order)
+    question_ids = [str(question.id) for question in ordered_questions]
+    matched_count = sum(1 for question_id in question_ids if question_id in normalized_answers)
+
+    if matched_count == len(question_ids) or matched_count > 0:
+        return normalized_answers, False
+
+    if len(normalized_answers) != len(question_ids):
+        return normalized_answers, False
+
+    remapped: dict[str, str | int | float] = {}
+    values_in_order = list(normalized_answers.values())
+    for index, question in enumerate(ordered_questions):
+        remapped[str(question.id)] = values_in_order[index]
+    return remapped, True
+
+
 def is_question_correct(question: Question, raw_answer: str | int | float) -> bool:
     if _is_two_part_question(question):
         user_first, user_second = _parse_two_part_payload(raw_answer)

@@ -279,6 +279,12 @@ class TestService:
                 correct_answer_text=correct_answer_text,
                 sort_order=idx,
             )
+            raw_question_id = item.get("id")
+            if raw_question_id:
+                try:
+                    q.id = UUID(str(raw_question_id))
+                except Exception:
+                    pass
 
             if question_type in TWO_PART_TYPES:
                 sub_questions = [str(value or "").strip() for value in item.get("subQuestions", [])][:2]

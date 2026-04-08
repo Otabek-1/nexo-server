@@ -17,7 +17,12 @@ from app.repositories.registration_repository import RegistrationRepository
 from app.repositories.submission_repository import SubmissionRepository
 from app.services.plan_service import PlanService
 from app.services.rasch_service import estimate_rasch_1pl, summarize_rasch_items, theta_to_score_100
-from app.services.scoring_service import auto_score_submission, is_question_correct, two_part_part_results
+from app.services.scoring_service import (
+    auto_score_submission,
+    canonicalize_answers,
+    is_question_correct,
+    two_part_part_results,
+)
 from app.services.test_service import TestService
 from app.utils.phone import normalize_phone_e164
 
@@ -82,8 +87,9 @@ class SubmissionService:
             if submissions_count >= DEFAULT_FREE_LIMITS["submissionsPerTest"]:
                 raise HTTPException(status_code=400, detail="Free submissionsPerTest limit reached")
 
+        canonical_answers, _ = canonicalize_answers(test.questions, answers)
         auto_score, auto_max, status = auto_score_submission(
-            test.questions, answers, test.scoring_type
+            test.questions, canonical_answers, test.scoring_type
         )
         final_score = auto_score if status == SubmissionStatus.COMPLETED else None
         row = Submission(
@@ -92,7 +98,7 @@ class SubmissionService:
             participant_attempt_value=attempt_value,
             participant_secondary=secondary,
             participant_fields_json=participant_values,
-            answers_json={str(k): v for k, v in answers.items()},
+            answers_json=canonical_answers,
             auto_score=auto_score,
             auto_max_score=auto_max,
             final_score=final_score,
@@ -116,7 +122,7 @@ class SubmissionService:
             rows = rows[: DEFAULT_FREE_LIMITS["manualReviewRecent"]]
         if latest:
             rows = rows[:latest]
-        return [self.serialize_submission(s) for s in rows]
+        return [self.serialize_submission(s, test=test) for s in rows]
 
     async def patch_manual_grades(
         self, test_id: int, submission_id: UUID, user_id: UUID, grades: dict[str, float]
@@ -141,7 +147,7 @@ class SubmissionService:
                 )
         await self.db.commit()
         await self.db.refresh(submission)
-        return self.serialize_submission(submission)
+        return self.serialize_submission(submission, test=test)
 
     async def finalize_submission(
         self, test_id: int, submission_id: UUID, user_id: UUID, override: float | None
@@ -170,7 +176,7 @@ class SubmissionService:
             if not refreshed:
                 raise HTTPException(status_code=404, detail="Submission not found")
             await self.db.commit()
-            return self.serialize_submission(refreshed)
+            return self.serialize_submission(refreshed, test=test)
 
         manual_total, _, _ = self._manual_component(submission=submission, test=test)
         submission.final_score = submission.auto_score + manual_total
@@ -179,7 +185,7 @@ class SubmissionService:
         submission.review_by = user_id
         await self.db.commit()
         await self.db.refresh(submission)
-        return self.serialize_submission(submission)
+        return self.serialize_submission(submission, test=test)
 
     async def leaderboard(self, test_id: int) -> dict:
         test = await self.test_service.get_test_or_404(test_id)
@@ -221,17 +227,20 @@ class SubmissionService:
             "raschStats": self._build_rasch_stats(test=test, rows=rows),
         }
 
-    def serialize_submission(self, row: Submission) -> dict:
+    def serialize_submission(self, row: Submission, test: Test | None = None) -> dict:
         state = inspect(row)
         if "manual_grades" in state.unloaded:
             manual = {}
         else:
             manual = {str(g.question_id): float(g.score) for g in row.manual_grades}
+        answers = row.answers_json
+        if test is not None:
+            answers, _ = canonicalize_answers(test.questions, row.answers_json)
         return {
             "id": row.id,
             "testId": row.test_id,
             "participant": self._participant(row),
-            "answers": row.answers_json,
+            "answers": answers,
             "autoScore": row.auto_score,
             "autoMaxScore": row.auto_max_score,
             "finalScore": row.final_score,
@@ -301,10 +310,13 @@ class SubmissionService:
         item_ids = [item["item_id"] for item in objective_items]
         matrix: list[list[int]] = []
         for row in rows:
+            row_answers, changed = canonicalize_answers(test.questions, row.answers_json)
+            if changed:
+                row.answers_json = row_answers
             row_vector: list[int] = []
             for item in objective_items:
                 q = item["question"]
-                ans = row.answers_json.get(str(q.id), "")
+                ans = row_answers.get(str(q.id), "")
                 if q.q_type in TWO_PART_TYPES:
                     is_first, is_second, _, _ = two_part_part_results(q, ans)
                     row_vector.append(1 if (is_first if item["part"] == "first" else is_second) else 0)
@@ -447,11 +459,14 @@ class SubmissionService:
         matrix: list[list[int]] = []
 
         for row in all_rows:
+            row_answers, changed = canonicalize_answers(test.questions, row.answers_json)
+            if changed:
+                row.answers_json = row_answers
             submission_ids.append(row.id)
             row_vector: list[int] = []
             for item in objective_items:
                 q = item["question"]
-                ans = row.answers_json.get(str(q.id), "")
+                ans = row_answers.get(str(q.id), "")
                 if q.q_type in TWO_PART_TYPES:
                     is_first, is_second, _, _ = two_part_part_results(q, ans)
                     row_vector.append(1 if (is_first if item["part"] == "first" else is_second) else 0)
