@@ -73,11 +73,38 @@ def _parse_two_part_correct(raw: str) -> tuple[str, str, float, float]:
     return first, second, first_points, second_points
 
 
+def _normalize_multiple_choice_value(value: str | int | float) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    upper = raw.upper()
+    if len(upper) == 1 and "A" <= upper <= "Z":
+        return str(ord(upper) - ord("A"))
+    try:
+        numeric = int(float(raw))
+        return str(numeric)
+    except Exception:
+        return raw
+
+
+def _normalize_true_false_value(value: str | int | float) -> str:
+    raw = _normalize_text(value).strip()
+    if raw in {"true", "1", "yes", "ha", "togri", "to'g'ri"}:
+        return "true"
+    if raw in {"false", "0", "no", "yoq", "yo'q", "notogri", "noto'g'ri"}:
+        return "false"
+    return raw
+
+
 def is_question_correct(question: Question, raw_answer: str | int | float) -> bool:
     if question.q_type == QuestionType.TWO_PART_WRITTEN:
         user_first, user_second = _parse_two_part_payload(raw_answer)
         correct_first, correct_second, _, _ = _parse_two_part_correct(question.correct_answer_text)
         return _same_cell_answer(user_first, correct_first) and _same_cell_answer(user_second, correct_second)
+    if question.q_type == QuestionType.MULTIPLE_CHOICE:
+        return _normalize_multiple_choice_value(raw_answer) == _normalize_multiple_choice_value(question.correct_answer_text)
+    if question.q_type == QuestionType.TRUE_FALSE:
+        return _normalize_true_false_value(raw_answer) == _normalize_true_false_value(question.correct_answer_text)
     return str(raw_answer) == str(question.correct_answer_text)
 
 

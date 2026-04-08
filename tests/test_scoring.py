@@ -67,3 +67,23 @@ def test_rasch_two_part_partial_points():
     assert score == 2.0
     assert max_score == 3.0
     assert status == SubmissionStatus.PENDING_REVIEW
+
+
+def test_multiple_choice_accepts_letter_or_numeric_answer_forms():
+    q = make_question(QuestionType.MULTIPLE_CHOICE, correct="B")
+    score, max_score, status = auto_score_submission(
+        [q], {"00000000-0000-0000-0000-000000000001": "1"}, ScoringType.CLASSIC
+    )
+    assert score == 1
+    assert max_score == 1
+    assert status == SubmissionStatus.COMPLETED
+
+
+def test_true_false_accepts_normalized_variants():
+    q = make_question(QuestionType.TRUE_FALSE, correct="To'g'ri")
+    score, max_score, status = auto_score_submission(
+        [q], {"00000000-0000-0000-0000-000000000001": "true"}, ScoringType.CLASSIC
+    )
+    assert score == 1
+    assert max_score == 1
+    assert status == SubmissionStatus.COMPLETED
