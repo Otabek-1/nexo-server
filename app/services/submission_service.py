@@ -386,10 +386,6 @@ class SubmissionService:
         if not rows:
             return
 
-        has_pending = any(row.status != SubmissionStatus.COMPLETED or row.final_score is None for row in rows)
-        if not has_pending:
-            return
-
         await self._finalize_rasch_for_test(
             test=test,
             triggering_submission_id=rows[0].id,
