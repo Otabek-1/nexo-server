@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import HTTPException
@@ -105,6 +106,7 @@ class SubmissionService:
         test = await self.test_service.get_test_or_404(test_id)
         if test.creator_id != user_id:
             raise HTTPException(status_code=403, detail="Forbidden")
+        await self._auto_finalize_rasch_if_ready(test)
         rows = await self.repo.list_for_test(test_id)
         if status:
             rows = [s for s in rows if s.status.value == status]
@@ -178,8 +180,9 @@ class SubmissionService:
         return self.serialize_submission(submission)
 
     async def leaderboard(self, test_id: int) -> dict:
-        rows = await self.repo.list_for_test(test_id, include_manual_grades=False)
         test = await self.test_service.get_test_or_404(test_id)
+        await self._auto_finalize_rasch_if_ready(test)
+        rows = await self.repo.list_for_test(test_id, include_manual_grades=False)
         ranked = sorted(
             [s for s in rows if s.status == SubmissionStatus.COMPLETED and s.final_score is not None],
             key=lambda x: (-float(x.final_score or 0), x.submitted_at),
@@ -372,6 +375,28 @@ class SubmissionService:
         if len(plain) <= limit:
             return plain
         return f"{plain[: max(limit - 1, 0)].rstrip()}…"
+
+    async def _auto_finalize_rasch_if_ready(self, test: Test) -> None:
+        if test.scoring_type != ScoringType.RASCH:
+            return
+        if datetime.now(UTC) < test.end_time:
+            return
+
+        rows = await self.repo.list_for_test(test.id, include_manual_grades=False)
+        if not rows:
+            return
+
+        has_pending = any(row.status != SubmissionStatus.COMPLETED or row.final_score is None for row in rows)
+        if not has_pending:
+            return
+
+        await self._finalize_rasch_for_test(
+            test=test,
+            triggering_submission_id=rows[0].id,
+            reviewer_id=test.creator_id,
+            override=None,
+        )
+        await self.db.commit()
 
     async def _finalize_rasch_for_test(
         self,
