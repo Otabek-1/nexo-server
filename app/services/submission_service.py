@@ -154,11 +154,13 @@ class SubmissionService:
             raise HTTPException(status_code=404, detail="Submission not found")
 
         if test.scoring_type == ScoringType.RASCH:
+            if override is not None:
+                raise HTTPException(status_code=400, detail="Rasch final score override qo'llab-quvvatlanmaydi")
             await self._finalize_rasch_for_test(
                 test=test,
                 triggering_submission_id=submission_id,
                 reviewer_id=user_id,
-                override=override,
+                override=None,
             )
             refreshed = await self.repo.get(submission_id)
             if not refreshed:
@@ -404,16 +406,15 @@ class SubmissionService:
         objective_items: list[dict] = []
         for q in objective_questions:
             if q.q_type == QuestionType.TWO_PART_WRITTEN:
-                _, _, first_points, second_points = two_part_part_results(q, "")
                 objective_items.append(
-                    {"item_id": f"{q.id}:first", "question": q, "part": "first", "points": first_points}
+                    {"item_id": f"{q.id}:first", "question": q, "part": "first"}
                 )
                 objective_items.append(
-                    {"item_id": f"{q.id}:second", "question": q, "part": "second", "points": second_points}
+                    {"item_id": f"{q.id}:second", "question": q, "part": "second"}
                 )
             else:
                 objective_items.append(
-                    {"item_id": str(q.id), "question": q, "part": None, "points": max(1.0, float(q.points))}
+                    {"item_id": str(q.id), "question": q, "part": None}
                 )
 
         item_ids = [item["item_id"] for item in objective_items]
@@ -439,35 +440,11 @@ class SubmissionService:
             matrix=matrix,
         )
 
-        objective_points = sum(float(item["points"]) for item in objective_items)
-        manual_points = sum(
-            max(1.0, float(q.points))
-            for q in test.questions
-            if q.q_type in {QuestionType.ESSAY, QuestionType.SHORT_ANSWER}
-        )
-        total_points = objective_points + manual_points
-        objective_weight = objective_points / total_points if total_points > 0 else 1.0
-        manual_weight = 1.0 - objective_weight
-
         now = datetime.now(UTC)
         for row in all_rows:
             theta = estimate.theta_by_submission.get(row.id, 0.0)
             rasch_score = theta_to_score_100(theta)
-            manual_score, manual_max, all_graded = self._manual_component(row, test)
-            manual_percent = (manual_score / manual_max * 100.0) if manual_max > 0 else 0.0
-
-            composite = rasch_score * objective_weight + manual_percent * manual_weight
-            row.final_score = round(composite, 4)
-            row.status = SubmissionStatus.COMPLETED if all_graded else SubmissionStatus.PENDING_REVIEW
-            if row.status == SubmissionStatus.COMPLETED:
-                row.reviewed_at = now
-                row.review_by = reviewer_id
-
-        if override is not None:
-            for row in all_rows:
-                if row.id == triggering_submission_id:
-                    row.final_score = max(0.0, float(override))
-                    row.status = SubmissionStatus.COMPLETED
-                    row.reviewed_at = now
-                    row.review_by = reviewer_id
-                    break
+            row.final_score = round(rasch_score, 4)
+            row.status = SubmissionStatus.COMPLETED
+            row.reviewed_at = now
+            row.review_by = reviewer_id

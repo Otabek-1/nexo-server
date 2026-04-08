@@ -57,3 +57,25 @@ def test_rasch_item_summary_counts():
     assert [item.incorrect_count for item in stats] == [1, 1, 2]
     assert stats[0].accuracy == 2 / 3
     assert stats[2].accuracy == 1 / 3
+
+
+def test_rasch_extreme_scores_remain_finite():
+    submission_ids = [
+        UUID("20000000-0000-0000-0000-000000000001"),
+        UUID("20000000-0000-0000-0000-000000000002"),
+        UUID("20000000-0000-0000-0000-000000000003"),
+        UUID("20000000-0000-0000-0000-000000000004"),
+    ]
+    item_ids = ["i1", "i2", "i3", "i4"]
+    matrix = [
+        [1, 1, 1, 1],
+        [1, 1, 0, 1],
+        [0, 1, 0, 0],
+        [0, 0, 0, 0],
+    ]
+
+    est = estimate_rasch_1pl(submission_ids=submission_ids, item_ids=item_ids, matrix=matrix)
+
+    assert all(abs(theta) < 10 for theta in est.theta_by_submission.values())
+    assert all(abs(diff) < 10 for diff in est.difficulty_by_item.values())
+    assert est.theta_by_submission[submission_ids[0]] > est.theta_by_submission[submission_ids[-1]]

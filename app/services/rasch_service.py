@@ -7,6 +7,8 @@ from uuid import UUID
 class RaschEstimate:
     theta_by_submission: dict[UUID, float]
     difficulty_by_item: dict[str, float]
+    theta_se_by_submission: dict[UUID, float]
+    item_se_by_item: dict[str, float]
 
 
 @dataclass
@@ -26,79 +28,152 @@ def _sigmoid(x: float) -> float:
     return z / (1.0 + z)
 
 
-def _prox_init_theta(matrix: list[list[int]]) -> list[float]:
-    if not matrix:
-        return []
-    k = max(1, len(matrix[0]))
-    adj = 0.3
-    thetas = []
-    for row in matrix:
-        raw = float(sum(row))
-        p = (raw + adj) / (k + 2 * adj)
-        p = max(1e-6, min(1 - 1e-6, p))
-        thetas.append(math.log(p / (1 - p)))
-    mean_theta = sum(thetas) / len(thetas)
-    return [t - mean_theta for t in thetas]
+def _normal_density(x: float) -> float:
+    return math.exp(-0.5 * x * x) / math.sqrt(2.0 * math.pi)
 
 
-def _prox_init_item_difficulty(matrix: list[list[int]]) -> list[float]:
+def _logsumexp(values: list[float]) -> float:
+    if not values:
+        return float("-inf")
+    anchor = max(values)
+    if not math.isfinite(anchor):
+        return anchor
+    return anchor + math.log(sum(math.exp(value - anchor) for value in values))
+
+
+def _initial_item_difficulties(matrix: list[list[int]]) -> list[float]:
     if not matrix:
         return []
     n = len(matrix)
     k = len(matrix[0])
-    adj = 0.3
+    adj = 0.5
     difficulties: list[float] = []
     for j in range(k):
-        col = sum(matrix[i][j] for i in range(n))
-        p = (float(col) + adj) / (n + 2 * adj)
-        p = max(1e-6, min(1 - 1e-6, p))
-        difficulties.append(math.log((1 - p) / p))
+        correct = sum(int(matrix[i][j]) for i in range(n))
+        p = (correct + adj) / (n + 2 * adj)
+        p = min(max(p, 1e-6), 1 - 1e-6)
+        difficulties.append(math.log((1.0 - p) / p))
     mean_b = sum(difficulties) / len(difficulties)
-    return [b - mean_b for b in difficulties]
+    return [value - mean_b for value in difficulties]
+
+
+def _quadrature_grid(size: int = 41, lower: float = -6.0, upper: float = 6.0) -> tuple[list[float], list[float]]:
+    if size < 3:
+        size = 3
+    step = (upper - lower) / float(size - 1)
+    nodes = [lower + step * index for index in range(size)]
+    weights = [_normal_density(node) for node in nodes]
+    total = sum(weights)
+    normalized = [weight / total for weight in weights]
+    return nodes, normalized
+
+
+def _posterior_by_submission(
+    matrix: list[list[int]],
+    difficulties: list[float],
+    nodes: list[float],
+    weights: list[float],
+) -> list[list[float]]:
+    posterior: list[list[float]] = []
+    for row in matrix:
+        log_terms: list[float] = []
+        for node, base_weight in zip(nodes, weights):
+            log_prob = math.log(base_weight)
+            for answer, difficulty in zip(row, difficulties):
+                p = _sigmoid(node - difficulty)
+                p = min(max(p, 1e-12), 1.0 - 1e-12)
+                log_prob += math.log(p) if int(answer) == 1 else math.log(1.0 - p)
+            log_terms.append(log_prob)
+        log_total = _logsumexp(log_terms)
+        posterior.append([math.exp(term - log_total) for term in log_terms])
+    return posterior
 
 
 def estimate_rasch_1pl(
     submission_ids: list[UUID],
     item_ids: list[str],
     matrix: list[list[int]],
-    max_iter: int = 40,
+    max_iter: int = 200,
+    tol: float = 1e-5,
 ) -> RaschEstimate:
     if not submission_ids or not item_ids or not matrix:
-        return RaschEstimate(theta_by_submission={}, difficulty_by_item={})
+        return RaschEstimate(
+            theta_by_submission={},
+            difficulty_by_item={},
+            theta_se_by_submission={},
+            item_se_by_item={},
+        )
 
     n = len(submission_ids)
     k = len(item_ids)
-    theta = _prox_init_theta(matrix)
-    b = _prox_init_item_difficulty(matrix)
+    nodes, weights = _quadrature_grid()
+    difficulties = _initial_item_difficulties(matrix)
 
     for _ in range(max_iter):
-        for i in range(n):
-            grad = 0.0
-            hess = 0.0
-            for j in range(k):
-                p = _sigmoid(theta[i] - b[j])
-                grad += matrix[i][j] - p
-                hess += p * (1 - p)
-            if hess > 1e-9:
-                theta[i] += grad / hess
+        posterior = _posterior_by_submission(matrix, difficulties, nodes, weights)
+        max_change = 0.0
 
         for j in range(k):
-            grad = 0.0
-            hess = 0.0
-            for i in range(n):
-                p = _sigmoid(theta[i] - b[j])
-                grad += p - matrix[i][j]
-                hess += p * (1 - p)
-            if hess > 1e-9:
-                b[j] += grad / hess
+            observed = float(sum(int(row[j]) for row in matrix))
+            current = difficulties[j]
 
-        mean_b = sum(b) / len(b)
-        b = [x - mean_b for x in b]
-        theta = [x - mean_b for x in theta]
+            for _newton_step in range(30):
+                expected = 0.0
+                information = 0.0
+                for person_index in range(n):
+                    for node_index, node in enumerate(nodes):
+                        post = posterior[person_index][node_index]
+                        p = _sigmoid(node - current)
+                        expected += post * p
+                        information += post * p * (1.0 - p)
 
-    theta_by_submission = {submission_ids[i]: theta[i] for i in range(n)}
-    difficulty_by_item = {item_ids[j]: b[j] for j in range(k)}
-    return RaschEstimate(theta_by_submission=theta_by_submission, difficulty_by_item=difficulty_by_item)
+                gradient = expected - observed
+                if information <= 1e-9:
+                    break
+
+                update = gradient / information
+                current -= update
+                current = min(max(current, -8.0), 8.0)
+                if abs(update) < 1e-7:
+                    break
+
+            max_change = max(max_change, abs(current - difficulties[j]))
+            difficulties[j] = current
+
+        mean_b = sum(difficulties) / len(difficulties)
+        difficulties = [value - mean_b for value in difficulties]
+
+        if max_change < tol:
+            break
+
+    final_posterior = _posterior_by_submission(matrix, difficulties, nodes, weights)
+
+    theta_by_submission: dict[UUID, float] = {}
+    theta_se_by_submission: dict[UUID, float] = {}
+    for index, submission_id in enumerate(submission_ids):
+        probs = final_posterior[index]
+        theta = sum(prob * node for prob, node in zip(probs, nodes))
+        variance = sum(prob * ((node - theta) ** 2) for prob, node in zip(probs, nodes))
+        theta_by_submission[submission_id] = theta
+        theta_se_by_submission[submission_id] = math.sqrt(max(variance, 1e-12))
+
+    item_se_by_item: dict[str, float] = {}
+    for item_index, item_id in enumerate(item_ids):
+        information = 0.0
+        for person_index in range(n):
+            for node_index, node in enumerate(nodes):
+                post = final_posterior[person_index][node_index]
+                p = _sigmoid(node - difficulties[item_index])
+                information += post * p * (1.0 - p)
+        item_se_by_item[item_id] = math.sqrt(1.0 / information) if information > 1e-9 else float("inf")
+
+    difficulty_by_item = {item_ids[index]: difficulties[index] for index in range(k)}
+    return RaschEstimate(
+        theta_by_submission=theta_by_submission,
+        difficulty_by_item=difficulty_by_item,
+        theta_se_by_submission=theta_se_by_submission,
+        item_se_by_item=item_se_by_item,
+    )
 
 
 def theta_to_score_100(theta: float) -> float:

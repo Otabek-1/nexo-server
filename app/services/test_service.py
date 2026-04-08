@@ -6,7 +6,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.constants import DEFAULT_FREE_LIMITS, PlanCode, QuestionType
+from app.core.constants import DEFAULT_FREE_LIMITS, PlanCode, QuestionType, ScoringType
 from app.models.domain import ParticipantField, Question, QuestionOption, Submission, Test
 from app.repositories.registration_repository import RegistrationRepository
 from app.repositories.test_repository import TestRepository
@@ -58,6 +58,7 @@ class TestService:
         questions = payload["questions"]
         if user_plan == PlanCode.FREE and len(questions) > DEFAULT_FREE_LIMITS["questionsPerTest"]:
             raise HTTPException(status_code=400, detail="Free questionsPerTest limit reached")
+        self._validate_rasch_configuration(test_data["scoringType"], questions)
 
         row = Test(
             creator_id=creator_id,
@@ -88,6 +89,10 @@ class TestService:
         test_data = payload.get("testData")
         questions = payload.get("questions")
         if test_data:
+            self._validate_rasch_configuration(
+                test_data["scoringType"],
+                questions if questions is not None else list(row.questions),
+            )
             row.title = test_data["title"].strip()
             row.description = sanitize_rich_html(test_data.get("description", ""))
             row.start_time = test_data["startTime"]
@@ -100,6 +105,10 @@ class TestService:
             row.test_type = test_data["testType"]
             self._replace_participant_fields(row, test_data.get("participantFields", []))
         if questions is not None:
+            self._validate_rasch_configuration(
+                test_data["scoringType"] if test_data else row.scoring_type,
+                questions,
+            )
             self._replace_questions(row, questions)
         await self.db.commit()
         updated = await self.get_test_or_404(test_id)
@@ -300,6 +309,51 @@ class TestService:
 
             mapped_questions.append(q)
         test.questions = mapped_questions
+
+    def _validate_rasch_configuration(self, scoring_type: str | ScoringType, questions: list[dict] | list[Question]) -> None:
+        if str(scoring_type) != ScoringType.RASCH.value:
+            return
+
+        supported_types = {
+            QuestionType.MULTIPLE_CHOICE,
+            QuestionType.TRUE_FALSE,
+            QuestionType.TWO_PART_WRITTEN,
+        }
+
+        for question in questions:
+            if isinstance(question, Question):
+                question_type = question.q_type
+                question_points = float(question.points or 1)
+                two_part_points = None
+                if question.q_type == QuestionType.TWO_PART_WRITTEN:
+                    _, _, first_points, second_points = self._decode_two_part_payload(question.correct_answer_text)
+                    two_part_points = [first_points, second_points]
+            else:
+                question_type = QuestionType(question["type"])
+                question_points = float(question.get("points", 1) or 1)
+                two_part_points = question.get("twoPartPoints", [])
+
+            if question_type not in supported_types:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Rasch tests faqat multiple-choice, true-false va two-part-written savollarni qo'llaydi",
+                )
+
+            if question_type in {QuestionType.MULTIPLE_CHOICE, QuestionType.TRUE_FALSE} and abs(question_points - 1.0) > 1e-9:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Rasch testsda multiple-choice va true-false savollar uchun ball 1 bo'lishi kerak",
+                )
+
+            if question_type == QuestionType.TWO_PART_WRITTEN:
+                normalized = [float(value or 1) for value in (two_part_points or [])[:2]]
+                while len(normalized) < 2:
+                    normalized.append(1.0)
+                if any(abs(value - 1.0) > 1e-9 for value in normalized):
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Rasch testsda two-part-written qismlarining har biri 1 ball bo'lishi kerak",
+                    )
 
     def _decode_two_part_payload(self, raw: str) -> tuple[str, str, float, float]:
         try:
