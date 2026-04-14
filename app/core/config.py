@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     app_name: str = "Nexo API"
     api_prefix: str = "/api/v1"
     debug: bool = True
-    cors_allow_origins: str = "http://localhost:5173,http://localhost:3000"
+    cors_allow_origins: str = "http://localhost:5173,http://localhost:3000,https://www.nexoo.space"
 
     database_url: str = ""
     db_host: str = "localhost"
