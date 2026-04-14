@@ -1,6 +1,7 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import db_session, get_current_user, get_current_user_optional, get_idempotency_key
@@ -164,38 +165,68 @@ async def get_question_stats(
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Get detailed stats for a question including option distribution"""
-    test_service = TestService(db)
-    submission_service = SubmissionService(db)
-    
-    test = await test_service.get_test_or_404(test_id)
-    question = next((q for q in test.questions if str(q.id) == question_id), None)
+
+    # Get test
+    result = await db.execute(select(Test).where(Test.id == test_id))
+    test = result.scalar_one_or_none()
+    if not test:
+        raise HTTPException(status_code=404, detail="Test not found")
+
+    # Find question
+    try:
+        from uuid import UUID
+        question_uuid = UUID(question_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid question ID format")
+
+    question = next((q for q in test.questions if q.id == question_uuid), None)
     if not question:
         raise HTTPException(status_code=404, detail="Question not found")
-    
-    rows = await db.execute(select(Submission).where(Submission.test_id == test_id))
-    submissions = rows.scalars().all()
-    
-    option_stats = {}
-    for q_option in question.options:
-        idx = q_option.option_index
-        count = sum(
-            1 for s in submissions
-            if str(question.id) in s.answers_json
-            and str(s.answers_json[str(question.id)]) == str(idx)
-        )
-        option_stats[idx] = {
-            "index": idx,
-            "html": q_option.option_html,
-            "count": count,
-            "percentage": (count / len(submissions) * 100) if submissions else 0,
+
+    # Get all submissions for this test
+    result = await db.execute(
+        select(Submission).where(Submission.test_id == test_id).where(Submission.status == "completed")
+    )
+    submissions = result.scalars().all()
+
+    if not submissions:
+        return {
+            "questionId": str(question.id),
+            "type": question.q_type.value,
+            "content": question.content_html,
+            "sortOrder": question.sort_order,
+            "points": question.points,
+            "options": {},
+            "totalResponses": 0,
         }
-    
+
+    # Build option stats
+    option_stats = {}
+
+    if question.q_type == QuestionType.MULTIPLE_CHOICE:
+        # Count responses per option
+        for option in question.options:
+            option_index = option.option_index
+            count = 0
+            for submission in submissions:
+                if str(question.id) in submission.answers_json:
+                    answer = submission.answers_json.get(str(question.id))
+                    if str(answer) == str(option_index) or int(answer) == option_index:
+                        count += 1
+
+            option_stats[option_index] = {
+                "index": option_index,
+                "html": option.option_html,
+                "count": count,
+                "percentage": (count / len(submissions) * 100) if submissions else 0,
+            }
+
     return {
         "questionId": str(question.id),
         "type": question.q_type.value,
         "content": question.content_html,
         "sortOrder": question.sort_order,
         "points": question.points,
-        "options": option_stats if question.q_type == QuestionType.MULTIPLE_CHOICE else [],
+        "options": option_stats if question.q_type == QuestionType.MULTIPLE_CHOICE else {},
         "totalResponses": len(submissions),
     }
