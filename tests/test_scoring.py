@@ -1,8 +1,8 @@
+import json
 from app.core.constants import QuestionType, ScoringType, SubmissionStatus
 from app.models.domain import Question
 from app.services.scoring_service import auto_score_submission
 from uuid import UUID
-import json
 
 
 def make_question(q_type: QuestionType, correct: str = "", points: float = 1):

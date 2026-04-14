@@ -79,11 +79,11 @@ def _posterior_by_submission(
         log_terms: list[float] = []
         for node, base_weight in zip(nodes, weights):
             log_prob = math.log(base_weight)
-            for answer, difficulty in zip(row, difficulties):
+            for difficulty, response in zip(difficulties, row):
                 p = _sigmoid(node - difficulty)
-                p = min(max(p, 1e-12), 1.0 - 1e-12)
-                log_prob += math.log(p) if int(answer) == 1 else math.log(1.0 - p)
+                log_prob += math.log(p if int(response) else 1.0 - p)
             log_terms.append(log_prob)
+
         log_total = _logsumexp(log_terms)
         posterior.append([math.exp(term - log_total) for term in log_terms])
     return posterior
@@ -114,31 +114,22 @@ def estimate_rasch_1pl(
         max_change = 0.0
 
         for j in range(k):
-            observed = float(sum(int(row[j]) for row in matrix))
-            current = difficulties[j]
+            observed = sum(int(matrix[i][j]) for i in range(n))
+            expected = 0.0
+            information = 0.0
+            for person_index in range(n):
+                for prob, node in zip(posterior[person_index], nodes):
+                    p = _sigmoid(node - difficulties[j])
+                    expected += prob * p
+                    information += prob * p * (1.0 - p)
 
-            for _newton_step in range(30):
-                expected = 0.0
-                information = 0.0
-                for person_index in range(n):
-                    for node_index, node in enumerate(nodes):
-                        post = posterior[person_index][node_index]
-                        p = _sigmoid(node - current)
-                        expected += post * p
-                        information += post * p * (1.0 - p)
+            if information <= 1e-9:
+                continue
 
-                gradient = expected - observed
-                if information <= 1e-9:
-                    break
-
-                update = gradient / information
-                current += update
-                current = min(max(current, -8.0), 8.0)
-                if abs(update) < 1e-7:
-                    break
-
-            max_change = max(max_change, abs(current - difficulties[j]))
-            difficulties[j] = current
+            update = (observed - expected) / information
+            difficulties[j] += update
+            difficulties[j] = min(max(difficulties[j], -8.0), 8.0)
+            max_change = max(max_change, abs(update))
 
         mean_b = sum(difficulties) / len(difficulties)
         difficulties = [value - mean_b for value in difficulties]
