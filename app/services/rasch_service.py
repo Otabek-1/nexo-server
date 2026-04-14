@@ -132,7 +132,7 @@ def estimate_rasch_1pl(
                     break
 
                 update = gradient / information
-                current -= update
+                current += update
                 current = min(max(current, -8.0), 8.0)
                 if abs(update) < 1e-7:
                     break
