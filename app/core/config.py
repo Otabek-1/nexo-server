@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Literal
 from urllib.parse import quote_plus
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BASE_DIR = Path(__file__).resolve().parents[2]
@@ -20,7 +20,13 @@ class Settings(BaseSettings):
     app_name: str = "Nexo API"
     api_prefix: str = "/api/v1"
     debug: bool = True
-    cors_allow_origins: str = "http://localhost:5173,http://localhost:3000,https://www.nexoo.space"
+    cors_allow_origins: list[str] = Field(
+        default_factory=lambda: [
+            "http://localhost:5173",
+            "http://localhost:3000",
+            "https://www.nexoo.space",
+        ]
+    )
 
     database_url: str = ""
     db_host: str = "localhost"
