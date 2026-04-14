@@ -172,50 +172,38 @@ async def get_question_stats(
     if not test:
         raise HTTPException(status_code=404, detail="Test not found")
 
-    # Find question
+    # Parse question ID
     try:
-        from uuid import UUID
-        question_uuid = UUID(question_id)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid question ID format")
+        q_uuid = UUID(question_id)
+    except (ValueError, AttributeError):
+        raise HTTPException(status_code=400, detail="Invalid question ID")
 
-    question = next((q for q in test.questions if q.id == question_uuid), None)
+    # Find question in test
+    question = next((q for q in test.questions if q.id == q_uuid), None)
     if not question:
         raise HTTPException(status_code=404, detail="Question not found")
 
-    # Get all submissions for this test
-    result = await db.execute(
-        select(Submission).where(Submission.test_id == test_id).where(Submission.status == "completed")
+    # Get all completed submissions
+    stmt = select(Submission).where(
+        Submission.test_id == test_id,
+        Submission.status == "completed",
     )
+    result = await db.execute(stmt)
     submissions = result.scalars().all()
 
-    if not submissions:
-        return {
-            "questionId": str(question.id),
-            "type": question.q_type.value,
-            "content": question.content_html,
-            "sortOrder": question.sort_order,
-            "points": question.points,
-            "options": {},
-            "totalResponses": 0,
-        }
-
-    # Build option stats
-    option_stats = {}
+    # Build response
+    options_data = {}
 
     if question.q_type == QuestionType.MULTIPLE_CHOICE:
-        # Count responses per option
         for option in question.options:
-            option_index = option.option_index
-            count = 0
-            for submission in submissions:
-                if str(question.id) in submission.answers_json:
-                    answer = submission.answers_json.get(str(question.id))
-                    if str(answer) == str(option_index) or int(answer) == option_index:
-                        count += 1
-
-            option_stats[option_index] = {
-                "index": option_index,
+            idx = option.option_index
+            count = sum(
+                1 for s in submissions
+                if str(question.id) in s.answers_json
+                and str(s.answers_json[str(question.id)]) == str(idx)
+            )
+            options_data[idx] = {
+                "index": idx,
                 "html": option.option_html,
                 "count": count,
                 "percentage": (count / len(submissions) * 100) if submissions else 0,
@@ -227,6 +215,6 @@ async def get_question_stats(
         "content": question.content_html,
         "sortOrder": question.sort_order,
         "points": question.points,
-        "options": option_stats if question.q_type == QuestionType.MULTIPLE_CHOICE else {},
+        "options": options_data,
         "totalResponses": len(submissions),
     }
