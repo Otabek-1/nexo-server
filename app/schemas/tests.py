@@ -23,7 +23,7 @@ class QuestionIn(BaseModel):
     twoPartCorrectAnswers: list[str] = Field(default_factory=list)
     twoPartPoints: list[float] = Field(default_factory=list)
     points: float = 1
-    correctAnswer: str = ""
+    correctAnswer: str
 
     @field_validator("points")
     @classmethod
@@ -81,6 +81,19 @@ class QuestionOut(BaseModel):
     twoPartPoints: list[float] = Field(default_factory=list)
     points: float
     correctAnswer: str
+
+
+class QuestionDetailOut(BaseModel):
+    id: UUID
+    type: str
+    content: str
+    options: list[str]
+    subQuestions: list[str] = Field(default_factory=list)
+    twoPartCorrectAnswers: list[str] = Field(default_factory=list)
+    points: float
+    correctAnswer: str
+    sortOrder: int
+    optionStats: list[dict] = Field(default_factory=list)  # NEW: option-wise answer counts
 
 
 class TestDetailOut(BaseModel):

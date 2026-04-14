@@ -155,3 +155,47 @@ async def finalize_submission(
 async def leaderboard(test_id: int, db: AsyncSession = Depends(db_session)):
     service = SubmissionService(db)
     return await service.leaderboard(test_id)
+
+
+@router.get("/tests/{test_id}/questions/{question_id}/stats", tags=["tests"])
+async def get_question_stats(
+    test_id: int,
+    question_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Get detailed stats for a question including option distribution"""
+    test_service = TestService(db)
+    submission_service = SubmissionService(db)
+    
+    test = await test_service.get_test_or_404(test_id)
+    question = next((q for q in test.questions if str(q.id) == question_id), None)
+    if not question:
+        raise HTTPException(status_code=404, detail="Question not found")
+    
+    rows = await db.execute(select(Submission).where(Submission.test_id == test_id))
+    submissions = rows.scalars().all()
+    
+    option_stats = {}
+    for q_option in question.options:
+        idx = q_option.option_index
+        count = sum(
+            1 for s in submissions
+            if str(question.id) in s.answers_json
+            and str(s.answers_json[str(question.id)]) == str(idx)
+        )
+        option_stats[idx] = {
+            "index": idx,
+            "html": q_option.option_html,
+            "count": count,
+            "percentage": (count / len(submissions) * 100) if submissions else 0,
+        }
+    
+    return {
+        "questionId": str(question.id),
+        "type": question.q_type.value,
+        "content": question.content_html,
+        "sortOrder": question.sort_order,
+        "points": question.points,
+        "options": option_stats if question.q_type == QuestionType.MULTIPLE_CHOICE else [],
+        "totalResponses": len(submissions),
+    }
