@@ -1,11 +1,13 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import db_session, get_current_user, get_current_user_optional, get_idempotency_key
+from app.core.constants import QuestionType
 from app.core.ratelimit import rate_limit
+from app.models.domain import Question, Submission, Test
 from app.schemas.common import APIMessage
 from app.schemas.submissions import (
     FinalizeRequest,
@@ -158,11 +160,11 @@ async def leaderboard(test_id: int, db: AsyncSession = Depends(db_session)):
     return await service.leaderboard(test_id)
 
 
-@router.get("/tests/{test_id}/questions/{question_id}/stats", tags=["tests"])
+@router.get("/{test_id}/questions/{question_id}/stats")
 async def get_question_stats(
     test_id: int,
     question_id: str,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(db_session),
 ) -> dict:
     """Get detailed stats for a question including option distribution"""
 
