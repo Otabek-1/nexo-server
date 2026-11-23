@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     jwt_access_ttl_min: int = 15
     jwt_refresh_ttl_days: int = 30
 
-    storage_provider: Literal["local", "minio", "supabase"] = "local"
+    storage_provider: Literal["local", "minio", "supabase", "s3"] = "local"
     storage_local_dir: str = "./storage"
     storage_sign_ttl_seconds: int = 900
     storage_max_file_size: int = 10 * 1024 * 1024

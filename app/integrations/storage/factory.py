@@ -6,7 +6,7 @@ from app.integrations.storage.s3 import S3StorageProvider
 
 def get_storage_provider() -> StorageProvider:
     settings = get_settings()
-    if settings.storage_provider in {"minio", "supabase"}:
+    if settings.storage_provider in {"minio", "supabase", "s3"}:
         return S3StorageProvider()
     return LocalStorageProvider()
 
