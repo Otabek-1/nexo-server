@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from json import JSONDecodeError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -24,11 +24,15 @@ async def get_registration_link(
     return {"testId": test_id, "registrationLink": bot.registration_link(test_id)}
 
 
-@router.post("/webhook/{secret}")
-async def telegram_webhook(secret: str, request: Request, db: AsyncSession = Depends(db_session)):
+@router.post("/webhook")
+async def telegram_webhook(
+    request: Request,
+    db: AsyncSession = Depends(db_session),
+    x_telegram_bot_api_secret_token: str | None = Header(default=None),
+):
     settings = get_settings()
     expected = settings.telegram_webhook_secret
-    if expected and secret != expected:
+    if expected and x_telegram_bot_api_secret_token != expected:
         raise HTTPException(status_code=403, detail="Invalid secret")
 
     try:
