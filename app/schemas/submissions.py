@@ -16,6 +16,10 @@ class SubmissionParticipantOut(BaseModel):
     attemptValue: str
 
 
+class PublicLeaderboardParticipantOut(BaseModel):
+    fullName: str
+
+
 class SubmissionOut(BaseModel):
     id: UUID
     testId: int
@@ -40,14 +44,14 @@ class FinalizeRequest(BaseModel):
 
 class LeaderboardItem(BaseModel):
     id: UUID
-    participant: SubmissionParticipantOut
+    participant: PublicLeaderboardParticipantOut
     finalScore: float
     submittedAt: datetime
 
 
 class PendingItem(BaseModel):
     id: UUID
-    participant: SubmissionParticipantOut
+    participant: PublicLeaderboardParticipantOut
     submittedAt: datetime
     status: str
 

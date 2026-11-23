@@ -1,16 +1,19 @@
+from hashlib import sha256
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import db_session, get_current_user
 from app.core.config import get_settings
+from app.models.domain import MediaAsset
 from app.schemas.storage import (
     AssetOut,
     CompleteUploadRequest,
-    SignUploadRequest,
     SignedUploadResponse,
+    SignUploadRequest,
 )
 from app.services.storage_service import StorageService
 
@@ -57,11 +60,32 @@ async def complete_upload(
 
 
 @router.put("/local-upload/{object_key:path}")
-async def local_upload(object_key: str, request: Request):
+async def local_upload(
+    object_key: str,
+    request: Request,
+    user=Depends(get_current_user),
+    db: AsyncSession = Depends(db_session),
+):
     settings = get_settings()
     if settings.storage_provider != "local":
         raise HTTPException(status_code=404, detail="Not found")
+    result = await db.execute(select(MediaAsset).where(MediaAsset.object_key == object_key))
+    asset = result.scalar_one_or_none()
+    if not asset or asset.owner_id != user.id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    if asset.is_completed:
+        raise HTTPException(status_code=409, detail="Upload already completed")
+    if request.headers.get("content-type", "").split(";")[0].strip().lower() != asset.mime_type.lower():
+        raise HTTPException(status_code=400, detail="Invalid content type")
     body = await request.body()
+    if len(body) > asset.size_bytes:
+        raise HTTPException(status_code=400, detail="Upload exceeds declared size")
+    if len(body) != asset.size_bytes:
+        raise HTTPException(status_code=400, detail="Upload size does not match declaration")
+    if asset.checksum:
+        digest = sha256(body).hexdigest()
+        if digest.lower() != asset.checksum.lower():
+            raise HTTPException(status_code=400, detail="Checksum mismatch")
     base = Path(settings.storage_local_dir).resolve()
     target = (base / object_key).resolve()
     if not str(target).startswith(str(base)):

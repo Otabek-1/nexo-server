@@ -5,7 +5,8 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
+COPY requirements.lock /app/requirements.lock
+RUN pip install --no-cache-dir --upgrade pip && pip install --no-cache-dir -r /app/requirements.lock
 COPY . /app
-RUN pip install --no-cache-dir --upgrade pip && pip install --no-cache-dir .
 
 EXPOSE 8000

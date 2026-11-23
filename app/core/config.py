@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Literal
 from urllib.parse import quote_plus
 
-from pydantic import Field, field_validator
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BASE_DIR = Path(__file__).resolve().parents[2]
@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     app_env: Literal["dev", "staging", "prod"] = "dev"
     app_name: str = "Nexo API"
     api_prefix: str = "/api/v1"
-    debug: bool = True
+    debug: bool = False
     cors_allow_origins: list[str] = Field(
         default_factory=lambda: [
             "http://localhost:5173",
@@ -35,10 +35,8 @@ class Settings(BaseSettings):
     db_user: str = "postgres"
     db_password: str = "postgres"
     db_sslmode: Literal["disable", "allow", "prefer", "require", "verify-ca", "verify-full"] = "disable"
-    redis_url: str = "redis://localhost:6379/0"
-
-    jwt_secret_key: str = Field(default="change-me-access", min_length=16)
-    jwt_refresh_secret_key: str = Field(default="change-me-refresh", min_length=16)
+    jwt_secret_key: str = ""
+    jwt_refresh_secret_key: str = ""
     jwt_access_ttl_min: int = 15
     jwt_refresh_ttl_days: int = 30
 
@@ -62,6 +60,25 @@ class Settings(BaseSettings):
     telegram_bot_token: str = ""
     telegram_bot_username: str = "nexo_bot"
     telegram_webhook_secret: str = ""
+
+    @model_validator(mode="after")
+    def validate_secrets(self):
+        weak_secrets = {
+            "",
+            "change-me-access",
+            "change-me-refresh",
+        }
+        for name in ("jwt_secret_key", "jwt_refresh_secret_key"):
+            value = getattr(self, name)
+            if (
+                value in weak_secrets
+                or value.startswith("replace-with")
+                or len(value) < 32
+            ):
+                raise ValueError(f"{name.upper()} must be at least 32 characters and must not use a placeholder")
+        if self.app_env == "prod" and self.debug:
+            raise ValueError("DEBUG must be false when APP_ENV=prod")
+        return self
 
     @property
     def async_database_url(self) -> str:

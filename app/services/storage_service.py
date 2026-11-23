@@ -63,6 +63,13 @@ class StorageService:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="asset not found")
         if row.owner_id != owner_id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="forbidden")
+        if row.provider == "local":
+            target = (Path(self.settings.storage_local_dir).resolve() / row.object_key).resolve()
+            base = Path(self.settings.storage_local_dir).resolve()
+            if not str(target).startswith(str(base)) or not target.is_file():
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="uploaded file not found")
+            if target.stat().st_size != row.size_bytes:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="upload is incomplete")
         row.is_completed = True
         await self.db.flush()
         return row

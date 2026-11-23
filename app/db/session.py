@@ -27,6 +27,7 @@ else:
     if is_supabase_pooler:
         # Avoid holding persistent pooled sessions against Supabase poolers.
         engine_kwargs["poolclass"] = NullPool
+        engine_kwargs["connect_args"]["ssl"] = "require"
     db_url = db_url.set(query=query)
     engine = create_async_engine(db_url.render_as_string(hide_password=False), **engine_kwargs)
 

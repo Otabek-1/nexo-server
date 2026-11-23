@@ -26,7 +26,6 @@ from app.services.scoring_service import (
 from app.services.test_service import TestService
 from app.utils.phone import normalize_phone_e164
 
-
 TWO_PART_TYPES = {QuestionType.TWO_PART_WRITTEN, QuestionType.TWO_PART_MATH}
 
 
@@ -204,7 +203,7 @@ class SubmissionService:
             "ranked": [
                 {
                     "id": s.id,
-                    "participant": self._participant(s),
+                    "participant": self._public_participant(s),
                     "finalScore": float(s.final_score or 0),
                     "submittedAt": s.submitted_at,
                 }
@@ -213,7 +212,7 @@ class SubmissionService:
             "pending": [
                 {
                     "id": s.id,
-                    "participant": self._participant(s),
+                    "participant": self._public_participant(s),
                     "submittedAt": s.submitted_at,
                     "status": s.status.value,
                 }
@@ -256,6 +255,11 @@ class SubmissionService:
             "phone": row.participant_secondary,
             "fields": row.participant_fields_json,
             "attemptValue": row.participant_attempt_value,
+        }
+
+    def _public_participant(self, row: Submission) -> dict:
+        return {
+            "fullName": row.participant_full_name,
         }
 
     def _manual_component(self, submission: Submission, test: Test) -> tuple[float, float, bool]:
