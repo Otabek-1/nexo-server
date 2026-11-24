@@ -1,6 +1,6 @@
 from fastapi import HTTPException
 
-from app.core.constants import QuestionType, ScoringType
+from app.core.constants import QuestionType, ScoringType, TestType as AssessmentType
 from app.services.test_service import TestService
 
 
@@ -83,3 +83,23 @@ def test_duration_without_modules_remains_unchanged():
     service = TestService(None)
 
     assert service._effective_duration("45", []) == 45
+
+
+def test_irt_and_sat_require_telegram_registration():
+    service = TestService(None)
+
+    assert service._requires_telegram_registration(ScoringType.IRT, AssessmentType.EXAM)
+    assert service._requires_telegram_registration(ScoringType.CLASSIC, AssessmentType.SAT)
+    assert not service._requires_telegram_registration(ScoringType.CLASSIC, AssessmentType.EXAM)
+
+
+def test_sat_requires_irt_scoring():
+    service = TestService(None)
+
+    try:
+        service._validate_test_mode(ScoringType.CLASSIC, AssessmentType.SAT)
+    except HTTPException as error:
+        assert error.status_code == 400
+        assert "IRT scoring" in error.detail
+    else:
+        raise AssertionError("Expected SAT scoring validation error")

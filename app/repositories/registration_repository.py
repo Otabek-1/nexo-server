@@ -19,6 +19,12 @@ class RegistrationRepository:
         )
         return res.scalar_one_or_none()
 
+    async def list_for_test(self, test_id: int) -> list[TestRegistration]:
+        res = await self.db.execute(
+            select(TestRegistration).where(TestRegistration.test_id == test_id)
+        )
+        return list(res.scalars().all())
+
     async def upsert_registration(
         self,
         test_id: int,

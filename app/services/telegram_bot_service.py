@@ -1,13 +1,17 @@
 from datetime import UTC, datetime, timedelta
+import logging
 from urllib.parse import quote_plus
 
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
+from app.models.domain import Submission, Test
 from app.repositories.registration_repository import RegistrationRepository
 from app.services.test_service import TestService
 from app.utils.phone import normalize_phone_e164
+
+logger = logging.getLogger(__name__)
 
 
 class TelegramBotService:
@@ -27,7 +31,7 @@ class TelegramBotService:
     async def _send_message(self, chat_id: int, text: str, request_contact: bool = False) -> None:
         token = self.settings.telegram_bot_token
         if not token:
-            return
+            raise RuntimeError("Telegram bot token is not configured")
         payload: dict = {"chat_id": chat_id, "text": text}
         if request_contact:
             payload["reply_markup"] = {
@@ -38,7 +42,48 @@ class TelegramBotService:
         else:
             payload["reply_markup"] = {"remove_keyboard": True}
         async with httpx.AsyncClient(timeout=10) as client:
-            await client.post(f"https://api.telegram.org/bot{token}/sendMessage", json=payload)
+            response = await client.post(f"https://api.telegram.org/bot{token}/sendMessage", json=payload)
+            response.raise_for_status()
+            result = response.json()
+            if not result.get("ok"):
+                raise RuntimeError(f"Telegram sendMessage failed: {result.get('description', 'unknown error')}")
+
+    async def notify_test_results(self, test: Test, submissions: list[Submission]) -> None:
+        registrations = await self.repo.list_for_test(test.id)
+        registrations_by_phone = {row.phone_e164: row for row in registrations}
+        sent_any = False
+
+        for submission in submissions:
+            if submission.final_score is None or submission.result_notified_at is not None:
+                continue
+            registration = registrations_by_phone.get(submission.participant_attempt_value)
+            if registration is None:
+                logger.warning(
+                    "Cannot notify submission %s: no Telegram registration for test %s",
+                    submission.id,
+                    test.id,
+                )
+                continue
+
+            message = (
+                f"✅ {test.title}: natijangiz tayyor.\n"
+                f"Yakuniy ball: {submission.final_score:g}"
+            )
+            try:
+                await self._send_message(registration.telegram_user_id, message)
+            except (httpx.HTTPError, RuntimeError, ValueError) as error:
+                logger.warning(
+                    "Telegram result notification failed for submission %s: %s",
+                    submission.id,
+                    error,
+                )
+                continue
+
+            submission.result_notified_at = datetime.now(UTC)
+            sent_any = True
+
+        if sent_any:
+            await self.db.commit()
 
     async def handle_update(self, update: dict) -> dict:
         message = update.get("message") or {}

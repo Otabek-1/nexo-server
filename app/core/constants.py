@@ -22,6 +22,7 @@ class TestType(StrEnum):
     EXAM = "exam"
     OLYMPIAD = "olympiad"
     TEST = "test"
+    SAT = "sat"
 
 
 class QuestionType(StrEnum):

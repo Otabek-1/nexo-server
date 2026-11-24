@@ -180,6 +180,7 @@ class Submission(Base):
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     review_by: Mapped[UUID | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     idempotency_key: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    result_notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     test: Mapped["Test"] = relationship(back_populates="submissions")
     manual_grades: Mapped[list["ManualGrade"]] = relationship(

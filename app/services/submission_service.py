@@ -25,6 +25,7 @@ from app.services.scoring_service import (
     two_part_part_results,
 )
 from app.services.test_service import TestService
+from app.services.telegram_bot_service import TelegramBotService
 from app.utils.phone import normalize_phone_e164
 
 TWO_PART_TYPES = {QuestionType.TWO_PART_WRITTEN, QuestionType.TWO_PART_MATH}
@@ -46,6 +47,16 @@ class SubmissionService:
         idempotency_key: str | None = None,
     ) -> dict:
         test = await self.test_service.get_test_or_404(test_id)
+        if idempotency_key:
+            existing = await self.db.execute(
+                select(Submission).where(
+                    Submission.test_id == test_id, Submission.idempotency_key == idempotency_key
+                )
+            )
+            current = existing.scalar_one_or_none()
+            if current:
+                return self.serialize_submission(current)
+
         now = datetime.now(UTC)
         if now < test.start_time or now >= test.end_time:
             raise HTTPException(status_code=400, detail="Test not active")
@@ -71,16 +82,6 @@ class SubmissionService:
         else:
             attempt_value = full_name
             secondary = str(participant_values.get("phone", "")).strip()
-
-        if idempotency_key:
-            existing = await self.db.execute(
-                select(Submission).where(
-                    Submission.test_id == test_id, Submission.idempotency_key == idempotency_key
-                )
-            )
-            current = existing.scalar_one_or_none()
-            if current:
-                return self.serialize_submission(current)
 
         if test.creator_plan_snapshot == PlanCode.FREE:
             submissions_count = await self.repo.count_for_test(test_id)
@@ -176,6 +177,7 @@ class SubmissionService:
             if not refreshed:
                 raise HTTPException(status_code=404, detail="Submission not found")
             await self.db.commit()
+            await self._notify_result_ready(test)
             return self.serialize_submission(refreshed, test=test)
 
         manual_total, _, _ = self._manual_component(submission=submission, test=test)
@@ -413,6 +415,14 @@ class SubmissionService:
             override=None,
         )
         await self.db.commit()
+        await self._notify_result_ready(test)
+
+    async def _notify_result_ready(self, test: Test) -> None:
+        if test.scoring_type != ScoringType.IRT:
+            return
+        rows = await self.repo.list_for_test(test.id, include_manual_grades=False)
+        bot = TelegramBotService(self.db)
+        await bot.notify_test_results(test, rows)
 
     async def _finalize_rasch_for_test(
         self,

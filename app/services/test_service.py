@@ -6,7 +6,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.constants import DEFAULT_FREE_LIMITS, PlanCode, QuestionType, ScoringType
+from app.core.constants import DEFAULT_FREE_LIMITS, PlanCode, QuestionType, ScoringType, TestType
 from app.models.domain import ParticipantField, Question, QuestionOption, Submission, Test
 from app.repositories.registration_repository import RegistrationRepository
 from app.repositories.test_repository import TestRepository
@@ -58,6 +58,10 @@ class TestService:
 
         test_data = payload["testData"]
         questions = payload["questions"]
+        self._validate_test_mode(test_data["scoringType"], test_data["testType"])
+        attempts_enabled = bool(test_data.get("attemptsEnabled", False)) or self._requires_telegram_registration(
+            test_data["scoringType"], test_data["testType"]
+        )
         modules = self._normalize_modules(test_data.get("modules", []))
         if user_plan == PlanCode.FREE and len(questions) > DEFAULT_FREE_LIMITS["questionsPerTest"]:
             raise HTTPException(status_code=400, detail="Free questionsPerTest limit reached")
@@ -71,7 +75,7 @@ class TestService:
             end_time=test_data["endTime"],
             duration_minutes=self._effective_duration(test_data["duration"], modules),
             attempts_count=int(test_data["attemptsCount"]),
-            attempts_enabled=bool(test_data.get("attemptsEnabled", False)),
+            attempts_enabled=attempts_enabled,
             registration_window_hours=test_data.get("registrationWindowHours"),
             scoring_type=test_data["scoringType"],
             test_type=test_data["testType"],
@@ -93,6 +97,7 @@ class TestService:
         test_data = payload.get("testData")
         questions = payload.get("questions")
         if test_data:
+            self._validate_test_mode(test_data["scoringType"], test_data["testType"])
             modules = self._normalize_modules(test_data.get("modules", []))
             self._validate_rasch_configuration(
                 test_data["scoringType"],
@@ -104,7 +109,9 @@ class TestService:
             row.end_time = test_data["endTime"]
             row.duration_minutes = self._effective_duration(test_data["duration"], modules)
             row.attempts_count = int(test_data["attemptsCount"])
-            row.attempts_enabled = bool(test_data.get("attemptsEnabled", False))
+            row.attempts_enabled = bool(test_data.get("attemptsEnabled", False)) or self._requires_telegram_registration(
+                test_data["scoringType"], test_data["testType"]
+            )
             row.registration_window_hours = test_data.get("registrationWindowHours")
             row.scoring_type = test_data["scoringType"]
             row.test_type = test_data["testType"]
@@ -437,6 +444,16 @@ class TestService:
             + (int(module["breakAfterMinutes"]) if index < len(modules) - 1 else 0)
             for index, module in enumerate(modules)
         )
+
+    def _requires_telegram_registration(self, scoring_type: str | ScoringType, test_type: str | TestType) -> bool:
+        return (
+            str(scoring_type) == ScoringType.IRT.value
+            or str(test_type) == TestType.SAT.value
+        )
+
+    def _validate_test_mode(self, scoring_type: str | ScoringType, test_type: str | TestType) -> None:
+        if str(test_type) == TestType.SAT.value and str(scoring_type) != ScoringType.IRT.value:
+            raise HTTPException(status_code=400, detail="SAT testlar uchun IRT scoring talab qilinadi")
 
     def _decode_two_part_payload(self, raw: str) -> tuple[str, str, float, float]:
         try:
