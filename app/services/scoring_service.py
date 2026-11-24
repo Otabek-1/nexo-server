@@ -1,5 +1,6 @@
 import json
 import re
+from tokenize import TokenError
 
 from sympy import SympifyError, simplify
 from sympy.parsing.sympy_parser import (
@@ -93,6 +94,18 @@ def _normalize_math_text(value: str | int | float) -> str:
     text = re.sub(r"\barccos\b", "acos", text, flags=re.IGNORECASE)
     text = re.sub(r"\barctg\b", "atan", text, flags=re.IGNORECASE)
     text = re.sub(r"\barctan\b", "atan", text, flags=re.IGNORECASE)
+    text = re.sub(r"\\(?:d?frac)\s*\{([^{}]*)\}\s*\{([^{}]*)\}", r"((\1)/(\2))", text)
+    text = re.sub(r"\\sqrt\s*\{([^{}]*)\}", r"sqrt(\1)", text)
+    text = re.sub(r"\\(?:left|right)\b", "", text)
+    text = re.sub(r"\\(?:,|;|:|!|quad|qquad)\s*", "", text)
+    text = re.sub(r"\\(?:cdot|times)\b", "*", text)
+    text = re.sub(r"\\div\b", "/", text)
+    text = re.sub(r"\\pi\b", "pi", text)
+    text = re.sub(r"\\infty\b", "oo", text)
+    text = re.sub(r"\\(sin|cos|tan|cot|log|ln)\b", r"\1", text)
+    text = re.sub(r"\^\{([^{}]+)\}", r"^(\1)", text)
+    text = re.sub(r"\\[{}]", lambda match: "(" if match.group(0) == r"\{" else ")", text)
+    text = text.replace("{", "(").replace("}", ")")
     text = re.sub(r"\s+", " ", text)
     text = re.sub(r"\u221A\s*\(([^()]+)\)", r"sqrt(\1)", text)
     text = re.sub(r"\u221A\s*([A-Za-z0-9.]+)", r"sqrt(\1)", text)
@@ -130,8 +143,20 @@ def _same_math_answer(left: str, right: str) -> bool:
         if left_expr is None or right_expr is None:
             return left_normalized == right_normalized
         return bool(simplify(left_expr - right_expr) == 0)
-    except (SympifyError, TypeError, ValueError):
+    except (SympifyError, TokenError, SyntaxError, TypeError, ValueError):
         return left_normalized == right_normalized
+
+
+def _normalize_sat_math_answer(value: str | float) -> str:
+    return re.sub(r"\s+", "", str("" if value is None else value)).replace("\u2212", "-")
+
+
+def _sat_math_accepted_answers(raw: str) -> list[str]:
+    return [
+        _normalize_sat_math_answer(answer)
+        for answer in str(raw or "").split(",")
+        if _normalize_sat_math_answer(answer)
+    ]
 
 
 def _parse_two_part_payload(raw: str | int | float) -> tuple[str, str]:
@@ -217,6 +242,9 @@ def is_question_correct(question: Question, raw_answer: str | int | float) -> bo
         return _normalize_multiple_choice_value(raw_answer) == _normalize_multiple_choice_value(question.correct_answer_text)
     if question.q_type == QuestionType.TRUE_FALSE:
         return _normalize_true_false_value(raw_answer) == _normalize_true_false_value(question.correct_answer_text)
+    if question.q_type == QuestionType.SAT_MATH_INPUT:
+        normalized = _normalize_sat_math_answer(raw_answer)
+        return bool(normalized) and normalized in _sat_math_accepted_answers(question.correct_answer_text)
     if _looks_like_math(str(raw_answer or "")) or _looks_like_math(str(question.correct_answer_text or "")):
         return _same_math_answer(str(raw_answer or ""), str(question.correct_answer_text or ""))
     return str(raw_answer) == str(question.correct_answer_text)
@@ -251,6 +279,7 @@ def question_max_score(question: Question, scoring_type: ScoringType) -> float:
         QuestionType.TRUE_FALSE,
         QuestionType.TWO_PART_WRITTEN,
         QuestionType.TWO_PART_MATH,
+        QuestionType.SAT_MATH_INPUT,
     }:
         return 1
     return 0

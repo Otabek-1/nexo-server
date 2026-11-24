@@ -101,3 +101,44 @@ def test_two_part_math_accepts_equivalent_forms():
     assert score == 1
     assert max_score == 1
     assert status == SubmissionStatus.COMPLETED
+
+
+def test_sat_math_input_accepts_any_configured_answer_and_scores_automatically():
+    q = make_question(QuestionType.SAT_MATH_INPUT, correct="0.3, 0.33, 0.333, 1/3")
+    for answer in ("0.3", "0.33", "0.333", "1/3"):
+        score, max_score, status = auto_score_submission(
+            [q], {"00000000-0000-0000-0000-000000000001": answer}, ScoringType.IRT
+        )
+        assert score == 1
+        assert max_score == 1
+        assert status == SubmissionStatus.PENDING_REVIEW
+
+
+def test_sat_math_input_does_not_accept_unconfigured_numeric_equivalent():
+    q = make_question(QuestionType.SAT_MATH_INPUT, correct="0.3, 1/3")
+    score, max_score, _ = auto_score_submission(
+        [q], {"00000000-0000-0000-0000-000000000001": "0.30"}, ScoringType.CLASSIC
+    )
+    assert score == 0
+    assert max_score == 1
+
+
+def test_sat_math_input_accepts_zero_when_supplied_as_a_number():
+    q = make_question(QuestionType.SAT_MATH_INPUT, correct="0")
+    score, _, _ = auto_score_submission(
+        [q], {"00000000-0000-0000-0000-000000000001": 0}, ScoringType.CLASSIC
+    )
+    assert score == 1
+
+
+def test_math_scoring_accepts_power_and_latex_fraction():
+    q = make_question(
+        QuestionType.TWO_PART_MATH,
+        correct=json.dumps({"first": "8", "second": "1/3"}),
+    )
+    answer = json.dumps({"first": "2^3", "second": r"\frac{1}{3}"})
+    score, max_score, _ = auto_score_submission(
+        [q], {"00000000-0000-0000-0000-000000000001": answer}, ScoringType.CLASSIC
+    )
+    assert score == 1
+    assert max_score == 1

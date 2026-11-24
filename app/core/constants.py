@@ -29,6 +29,7 @@ class QuestionType(StrEnum):
     SHORT_ANSWER = "short-answer"
     TWO_PART_WRITTEN = "two-part-written"
     TWO_PART_MATH = "two-part-math"
+    SAT_MATH_INPUT = "sat-math-input"
     MULTIPLE_CHOICE = "multiple-choice"
     ESSAY = "essay"
     TRUE_FALSE = "true-false"

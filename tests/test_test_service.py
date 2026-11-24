@@ -1,4 +1,5 @@
 from fastapi import HTTPException
+import pytest
 
 from app.core.constants import QuestionType, ScoringType, TestType as AssessmentType
 from app.services.test_service import TestService
@@ -103,3 +104,25 @@ def test_sat_requires_irt_scoring():
         assert "IRT scoring" in error.detail
     else:
         raise AssertionError("Expected SAT scoring validation error")
+
+
+def test_sat_math_validation_accepts_comma_separated_short_numeric_variants():
+    service = TestService(None)
+    service._validate_sat_math_answers(
+        [
+            {
+                "type": QuestionType.SAT_MATH_INPUT.value,
+                "correctAnswer": "0.3, 0.33, 0.333, 1/3",
+            }
+        ]
+    )
+
+
+@pytest.mark.parametrize("correct_answer", ["", "0.3,,1/3", "123456", "answer", "1/1234", "1/0"])
+def test_sat_math_validation_rejects_empty_or_invalid_long_variants(correct_answer):
+    service = TestService(None)
+    with pytest.raises(HTTPException) as error:
+        service._validate_sat_math_answers(
+            [{"type": QuestionType.SAT_MATH_INPUT.value, "correctAnswer": correct_answer}]
+        )
+    assert error.value.status_code == 400

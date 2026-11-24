@@ -1,5 +1,6 @@
 from datetime import UTC, datetime
 import json
+import re
 from uuid import UUID
 
 from fastapi import HTTPException, status
@@ -15,6 +16,7 @@ from app.utils.phone import normalize_phone_e164
 from app.utils.html import sanitize_rich_html
 
 TWO_PART_TYPES = {QuestionType.TWO_PART_WRITTEN, QuestionType.TWO_PART_MATH}
+SAT_MATH_ANSWER_PATTERN = re.compile(r"^[+-]?(?:\d+(?:\.\d*)?|\.\d+|\d+/\d+)$")
 
 
 class TestService:
@@ -65,6 +67,7 @@ class TestService:
         modules = self._normalize_modules(test_data.get("modules", []))
         if user_plan == PlanCode.FREE and len(questions) > DEFAULT_FREE_LIMITS["questionsPerTest"]:
             raise HTTPException(status_code=400, detail="Free questionsPerTest limit reached")
+        self._validate_sat_math_answers(questions)
         self._validate_rasch_configuration(test_data["scoringType"], questions)
 
         row = Test(
@@ -103,6 +106,7 @@ class TestService:
                 test_data["scoringType"],
                 questions if questions is not None else list(row.questions),
             )
+            self._validate_sat_math_answers(questions if questions is not None else list(row.questions))
             row.title = test_data["title"].strip()
             row.description = sanitize_rich_html(test_data.get("description", ""))
             row.start_time = test_data["startTime"]
@@ -118,6 +122,7 @@ class TestService:
             row.modules_json = modules
             self._replace_participant_fields(row, test_data.get("participantFields", []))
         if questions is not None:
+            self._validate_sat_math_answers(questions)
             self._validate_rasch_configuration(
                 test_data["scoringType"] if test_data else row.scoring_type,
                 questions,
@@ -372,6 +377,7 @@ class TestService:
             QuestionType.TRUE_FALSE,
             QuestionType.TWO_PART_WRITTEN,
             QuestionType.TWO_PART_MATH,
+            QuestionType.SAT_MATH_INPUT,
         }
 
         for question in questions:
@@ -388,9 +394,9 @@ class TestService:
                 two_part_points = question.get("twoPartPoints", [])
 
             if question_type not in supported_types:
-                detail = "Rasch tests faqat multiple-choice, true-false, two-part-written va two-part-math savollarni qo'llaydi"
+                detail = "Rasch tests faqat multiple-choice, true-false, two-part-written, two-part-math va SAT Math savollarni qo'llaydi"
                 if normalized_scoring == ScoringType.IRT.value:
-                    detail = "IRT tests faqat multiple-choice, true-false, two-part-written va two-part-math savollarni qo'llaydi"
+                    detail = "IRT tests faqat multiple-choice, true-false, two-part-written, two-part-math va SAT Math savollarni qo'llaydi"
                 raise HTTPException(
                     status_code=400,
                     detail=detail,
@@ -402,6 +408,16 @@ class TestService:
                 raise HTTPException(
                     status_code=400,
                     detail="Rasch testsda multiple-choice va true-false savollar uchun ball 1 bo'lishi kerak",
+                )
+
+            if (
+                question_type == QuestionType.SAT_MATH_INPUT
+                and normalized_scoring == ScoringType.RASCH.value
+                and abs(question_points - 1.0) > 1e-9
+            ):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Rasch SAT Math savollari 1 ball bo'lishi kerak",
                 )
 
             if question_type in TWO_PART_TYPES:
@@ -454,6 +470,39 @@ class TestService:
     def _validate_test_mode(self, scoring_type: str | ScoringType, test_type: str | TestType) -> None:
         if str(test_type) == TestType.SAT.value and str(scoring_type) != ScoringType.IRT.value:
             raise HTTPException(status_code=400, detail="SAT testlar uchun IRT scoring talab qilinadi")
+
+    def _validate_sat_math_answers(self, questions: list[dict] | list[Question]) -> None:
+        for question in questions:
+            if isinstance(question, Question):
+                if question.q_type != QuestionType.SAT_MATH_INPUT:
+                    continue
+                correct_answers = str(question.correct_answer_text or "")
+            else:
+                if QuestionType(question["type"]) != QuestionType.SAT_MATH_INPUT:
+                    continue
+                correct_answers = str(question.get("correctAnswer") or "")
+
+            variants = [answer.strip() for answer in correct_answers.split(",")]
+            if not variants or any(not answer for answer in variants):
+                raise HTTPException(
+                    status_code=400,
+                    detail="SAT Math savoli uchun vergul bilan ajratilgan to'g'ri javoblar kiriting",
+                )
+            for answer in variants:
+                normalized = re.sub(r"\s+", "", answer)
+                valid_format = bool(SAT_MATH_ANSWER_PATTERN.fullmatch(normalized))
+                invalid_zero_denominator = (
+                    valid_format and "/" in normalized and int(normalized.split("/", 1)[1]) == 0
+                )
+                if (
+                    len(normalized) > 5
+                    or not valid_format
+                    or invalid_zero_denominator
+                ):
+                    raise HTTPException(
+                        status_code=400,
+                        detail="SAT Math javob variantlari son, kasr yoki o'nli son bo'lishi va 5 belgidan oshmasligi kerak",
+                    )
 
     def _decode_two_part_payload(self, raw: str) -> tuple[str, str, float, float]:
         try:

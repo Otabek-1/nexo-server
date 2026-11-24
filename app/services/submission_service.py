@@ -301,6 +301,7 @@ class SubmissionService:
                 QuestionType.TRUE_FALSE,
                 QuestionType.TWO_PART_WRITTEN,
                 QuestionType.TWO_PART_MATH,
+                QuestionType.SAT_MATH_INPUT,
             }
         ]
         if not objective_questions:
@@ -440,6 +441,7 @@ class SubmissionService:
                 QuestionType.TRUE_FALSE,
                 QuestionType.TWO_PART_WRITTEN,
                 QuestionType.TWO_PART_MATH,
+                QuestionType.SAT_MATH_INPUT,
             }
         ]
 
