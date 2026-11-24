@@ -1,6 +1,8 @@
 from datetime import UTC, datetime, timedelta
+from uuid import UUID
 
 from fastapi import HTTPException, status
+from jwt import InvalidTokenError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -50,12 +52,25 @@ class AuthService:
         return AuthResponse(user=UserOut.model_validate(user), tokens=tokens)
 
     async def refresh(self, refresh_token: str) -> AuthTokens:
-        payload = decode_refresh_token(refresh_token)
+        try:
+            payload = decode_refresh_token(refresh_token)
+        except InvalidTokenError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid or expired refresh token",
+            ) from exc
         if payload.get("type") != "refresh":
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token type")
+        try:
+            user_id = UUID(payload["sub"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid refresh token subject",
+            ) from exc
         if not await self.repo.is_refresh_active(refresh_token):
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh token revoked")
-        user = await self.repo.get_by_id(payload["sub"])
+        user = await self.repo.get_by_id(user_id)
         if not user:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
         await self.repo.revoke_refresh(refresh_token)
