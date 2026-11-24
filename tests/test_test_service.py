@@ -65,3 +65,21 @@ def test_rasch_accepts_two_part_math_with_unit_part_points():
     ]
 
     service._validate_rasch_configuration(ScoringType.RASCH, questions)
+
+
+def test_module_timing_sets_total_duration_and_ignores_final_break():
+    service = TestService(None)
+    modules = service._normalize_modules(
+        [
+            {"id": "rw", "durationMinutes": 32, "breakAfterMinutes": 10},
+            {"id": "math", "durationMinutes": 35, "breakAfterMinutes": 10},
+        ]
+    )
+
+    assert service._effective_duration(3, modules) == 77
+
+
+def test_duration_without_modules_remains_unchanged():
+    service = TestService(None)
+
+    assert service._effective_duration("45", []) == 45

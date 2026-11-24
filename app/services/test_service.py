@@ -58,6 +58,7 @@ class TestService:
 
         test_data = payload["testData"]
         questions = payload["questions"]
+        modules = self._normalize_modules(test_data.get("modules", []))
         if user_plan == PlanCode.FREE and len(questions) > DEFAULT_FREE_LIMITS["questionsPerTest"]:
             raise HTTPException(status_code=400, detail="Free questionsPerTest limit reached")
         self._validate_rasch_configuration(test_data["scoringType"], questions)
@@ -68,14 +69,14 @@ class TestService:
             description=sanitize_rich_html(test_data.get("description", "")),
             start_time=test_data["startTime"],
             end_time=test_data["endTime"],
-            duration_minutes=int(test_data["duration"]),
+            duration_minutes=self._effective_duration(test_data["duration"], modules),
             attempts_count=int(test_data["attemptsCount"]),
             attempts_enabled=bool(test_data.get("attemptsEnabled", False)),
             registration_window_hours=test_data.get("registrationWindowHours"),
             scoring_type=test_data["scoringType"],
             test_type=test_data["testType"],
             creator_plan_snapshot=user_plan,
-            modules_json=self._normalize_modules(test_data.get("modules", [])),
+            modules_json=modules,
         )
         self._replace_participant_fields(row, test_data.get("participantFields", []))
         self._replace_questions(row, questions)
@@ -92,6 +93,7 @@ class TestService:
         test_data = payload.get("testData")
         questions = payload.get("questions")
         if test_data:
+            modules = self._normalize_modules(test_data.get("modules", []))
             self._validate_rasch_configuration(
                 test_data["scoringType"],
                 questions if questions is not None else list(row.questions),
@@ -100,13 +102,13 @@ class TestService:
             row.description = sanitize_rich_html(test_data.get("description", ""))
             row.start_time = test_data["startTime"]
             row.end_time = test_data["endTime"]
-            row.duration_minutes = int(test_data["duration"])
+            row.duration_minutes = self._effective_duration(test_data["duration"], modules)
             row.attempts_count = int(test_data["attemptsCount"])
             row.attempts_enabled = bool(test_data.get("attemptsEnabled", False))
             row.registration_window_hours = test_data.get("registrationWindowHours")
             row.scoring_type = test_data["scoringType"]
             row.test_type = test_data["testType"]
-            row.modules_json = self._normalize_modules(test_data.get("modules", []))
+            row.modules_json = modules
             self._replace_participant_fields(row, test_data.get("participantFields", []))
         if questions is not None:
             self._validate_rasch_configuration(
@@ -426,6 +428,15 @@ class TestService:
                 }
             )
         return normalized
+
+    def _effective_duration(self, configured_duration: int | str, modules: list[dict]) -> int:
+        if not modules:
+            return int(configured_duration)
+        return sum(
+            int(module["durationMinutes"])
+            + (int(module["breakAfterMinutes"]) if index < len(modules) - 1 else 0)
+            for index, module in enumerate(modules)
+        )
 
     def _decode_two_part_payload(self, raw: str) -> tuple[str, str, float, float]:
         try:
