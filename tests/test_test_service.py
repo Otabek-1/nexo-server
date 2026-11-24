@@ -85,6 +85,41 @@ def test_module_timing_sets_total_duration_and_ignores_final_break():
     assert service._effective_duration(3, modules) == 77
 
 
+def test_module_timing_counts_only_one_adaptive_easy_or_hard_branch():
+    service = TestService(None)
+    modules = service._normalize_modules(
+        [
+            {
+                "id": "math-1",
+                "title": "Module 1",
+                "subject": "math",
+                "difficulty": "medium",
+                "durationMinutes": 32,
+                "breakAfterMinutes": 1,
+                "routing": "adaptive",
+            },
+            {
+                "id": "math-2-easy",
+                "title": "Module 2 easy",
+                "subject": "math",
+                "difficulty": "easy",
+                "durationMinutes": 32,
+                "breakAfterMinutes": 10,
+            },
+            {
+                "id": "math-2-hard",
+                "title": "Module 2 hard",
+                "subject": "math",
+                "difficulty": "hard",
+                "durationMinutes": 32,
+                "breakAfterMinutes": 10,
+            },
+        ]
+    )
+
+    assert service._effective_duration(107, modules) == 65
+
+
 def test_duration_without_modules_remains_unchanged():
     service = TestService(None)
 

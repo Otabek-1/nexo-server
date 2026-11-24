@@ -459,11 +459,50 @@ class TestService:
     def _effective_duration(self, configured_duration: int | str, modules: list[dict]) -> int:
         if not modules:
             return int(configured_duration)
-        return sum(
-            int(module["durationMinutes"])
-            + (int(module["breakAfterMinutes"]) if index < len(modules) - 1 else 0)
+
+        total = 0
+        index = 0
+        while index < len(modules):
+            module = modules[index]
+            branch_indices = self._adaptive_branch_indices(modules, index)
+            if not branch_indices:
+                total += int(module["durationMinutes"])
+                if index < len(modules) - 1:
+                    total += int(module["breakAfterMinutes"])
+                index += 1
+                continue
+
+            branch_end = max(branch_indices)
+            total += int(module["durationMinutes"]) + int(module["breakAfterMinutes"])
+            total += max(
+                int(modules[branch_index]["durationMinutes"])
+                + (
+                    int(modules[branch_index]["breakAfterMinutes"])
+                    if branch_end < len(modules) - 1
+                    else 0
+                )
+                for branch_index in branch_indices
+            )
+            index = branch_end + 1
+
+        return total
+
+    def _adaptive_branch_indices(self, modules: list[dict], source_index: int) -> list[int]:
+        source = modules[source_index]
+        if source["routing"] != "adaptive":
+            return []
+
+        branch_indices = [
+            index
             for index, module in enumerate(modules)
-        )
+            if index > source_index
+            and module["subject"] == source["subject"]
+            and module["difficulty"] in {"easy", "hard"}
+        ]
+        difficulties = {modules[index]["difficulty"] for index in branch_indices}
+        if {"easy", "hard"}.issubset(difficulties):
+            return branch_indices
+        return []
 
     def _requires_telegram_registration(self, scoring_type: str | ScoringType, test_type: str | TestType) -> bool:
         return (
