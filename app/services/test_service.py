@@ -1,6 +1,6 @@
-from datetime import UTC, datetime
 import json
 import re
+from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import HTTPException, status
@@ -12,8 +12,8 @@ from app.models.domain import ParticipantField, Question, QuestionOption, Submis
 from app.repositories.registration_repository import RegistrationRepository
 from app.repositories.test_repository import TestRepository
 from app.services.plan_service import PlanService
-from app.utils.phone import normalize_phone_e164
 from app.utils.html import sanitize_rich_html
+from app.utils.phone import normalize_phone_e164
 
 TWO_PART_TYPES = {QuestionType.TWO_PART_WRITTEN, QuestionType.TWO_PART_MATH}
 SAT_MATH_ANSWER_PATTERN = re.compile(r"^[+-]?(?:\d+(?:\.\d*)?|\.\d+|\d+/\d+)$")
@@ -86,7 +86,7 @@ class TestService:
             modules_json=modules,
         )
         self._replace_participant_fields(row, test_data.get("participantFields", []))
-        self._replace_questions(row, questions)
+        await self._replace_questions(row, questions)
         await self.repo.add(row)
         await self.db.commit()
 
@@ -127,7 +127,7 @@ class TestService:
                 test_data["scoringType"] if test_data else row.scoring_type,
                 questions,
             )
-            self._replace_questions(row, questions)
+            await self._replace_questions(row, questions)
         await self.db.commit()
         updated = await self.get_test_or_404(test_id)
         return self.serialize_test_detail(updated)
@@ -288,8 +288,12 @@ class TestService:
             )
         test.participant_fields = mapped_fields
 
-    def _replace_questions(self, test: Test, questions: list[dict]) -> None:
+    async def _replace_questions(self, test: Test, questions: list[dict]) -> None:
         existing_questions_by_id = {str(question.id): question for question in test.questions}
+        for question in existing_questions_by_id.values():
+            question.options.clear()
+        await self.db.flush()
+
         mapped_questions: list[Question] = []
         for idx, item in enumerate(questions):
             question_type = item["type"]

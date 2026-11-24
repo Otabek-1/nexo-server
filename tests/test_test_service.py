@@ -1,7 +1,12 @@
-from fastapi import HTTPException
-import pytest
+from types import SimpleNamespace
+from uuid import UUID
 
-from app.core.constants import QuestionType, ScoringType, TestType as AssessmentType
+import pytest
+from fastapi import HTTPException
+
+from app.core.constants import QuestionType, ScoringType
+from app.core.constants import TestType as AssessmentType
+from app.models.domain import Question, QuestionOption
 from app.services.test_service import TestService
 
 
@@ -84,6 +89,48 @@ def test_duration_without_modules_remains_unchanged():
     service = TestService(None)
 
     assert service._effective_duration("45", []) == 45
+
+
+@pytest.mark.asyncio
+async def test_replacing_question_options_deletes_old_rows_before_reinserting():
+    question_id = UUID("00000000-0000-0000-0000-000000000001")
+    question = Question(
+        id=question_id,
+        q_type=QuestionType.MULTIPLE_CHOICE,
+        content_html="Old question",
+        points=1,
+        correct_answer_text="0",
+        sort_order=0,
+        options=[QuestionOption(option_index=0, option_html="Old option")],
+    )
+
+    class FakeSession:
+        flush_count = 0
+
+        async def flush(self):
+            assert question.options == []
+            self.flush_count += 1
+
+    session = FakeSession()
+    service = TestService(session)
+    test = SimpleNamespace(questions=[question])
+
+    await service._replace_questions(
+        test,
+        [
+            {
+                "id": str(question_id),
+                "type": QuestionType.MULTIPLE_CHOICE.value,
+                "content": "Updated question",
+                "points": 1,
+                "correctAnswer": "0",
+                "options": ["New option A", "New option B"],
+            }
+        ],
+    )
+
+    assert session.flush_count == 1
+    assert [option.option_index for option in question.options] == [0, 1]
 
 
 def test_irt_and_sat_require_telegram_registration():
