@@ -94,16 +94,6 @@ class Settings(BaseSettings):
             f"{ssl_query}"
         )
 
-    @property
-    def sync_database_url(self) -> str:
-        url = self.async_database_url
-        if url.startswith("postgresql+asyncpg://"):
-            converted = "postgresql+psycopg2://" + url.removeprefix("postgresql+asyncpg://")
-        else:
-            converted = url
-        return converted.replace("ssl=require", "sslmode=require")
-
-
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
