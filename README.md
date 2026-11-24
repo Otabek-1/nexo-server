@@ -16,6 +16,8 @@ Frontend env (`client/.env`): `VITE_API_BASE_URL=http://localhost:8000/api/v1`
 alembic upgrade head
 ```
 
+After deploying backend changes that add database enum values or columns, run this command against the production database before creating tests that use those changes.
+
 ## Notes
 
 - `STORAGE_PROVIDER=local|minio|supabase`

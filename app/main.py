@@ -2,13 +2,14 @@ from contextlib import asynccontextmanager
 
 import structlog
 from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
+from starlette.types import ASGIApp
 
 from app.api.v1.router import api_router
 from app.core.config import get_settings
+from app.core.cors import with_cors
 from app.core.logging import configure_logging
 from app.db.session import SessionLocal
 from app.services.plan_service import PlanService
@@ -27,17 +28,10 @@ async def lifespan(app: FastAPI):
     logger.info("shutdown")
 
 
-def create_app() -> FastAPI:
+def create_app() -> ASGIApp:
     settings = get_settings()
     app = FastAPI(title=settings.app_name, debug=settings.debug, lifespan=lifespan)
     app.add_middleware(GZipMiddleware, minimum_size=500)
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=[item.strip() for item in settings.cors_allow_origins.split(",") if item.strip()],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
 
     @app.middleware("http")
     async def request_log_middleware(request: Request, call_next):
@@ -56,4 +50,4 @@ def create_app() -> FastAPI:
         return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
     app.include_router(api_router, prefix=settings.api_prefix)
-    return app
+    return with_cors(app, settings.cors_allow_origins)
