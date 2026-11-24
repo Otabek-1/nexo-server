@@ -75,6 +75,7 @@ class TestService:
             scoring_type=test_data["scoringType"],
             test_type=test_data["testType"],
             creator_plan_snapshot=user_plan,
+            modules_json=self._normalize_modules(test_data.get("modules", [])),
         )
         self._replace_participant_fields(row, test_data.get("participantFields", []))
         self._replace_questions(row, questions)
@@ -105,6 +106,7 @@ class TestService:
             row.registration_window_hours = test_data.get("registrationWindowHours")
             row.scoring_type = test_data["scoringType"]
             row.test_type = test_data["testType"]
+            row.modules_json = self._normalize_modules(test_data.get("modules", []))
             self._replace_participant_fields(row, test_data.get("participantFields", []))
         if questions is not None:
             self._validate_rasch_configuration(
@@ -211,6 +213,10 @@ class TestService:
                     "twoPartPoints": two_part_points,
                     "points": q.points,
                     "correctAnswer": correct_answer,
+                    "moduleId": q.module_id,
+                    "difficulty": q.difficulty,
+                    "discrimination": q.discrimination,
+                    "guessing": q.guessing,
                 }
             )
         has_essay = any(q["type"] == QuestionType.ESSAY.value for q in questions)
@@ -240,6 +246,7 @@ class TestService:
             "registrationWindowHours": row.registration_window_hours,
             "scoringType": row.scoring_type.value,
             "testType": row.test_type.value,
+            "modules": self._normalize_modules(getattr(row, "modules_json", []) or []),
             "participantFields": [
                 {
                     "id": f.field_key,
@@ -273,6 +280,12 @@ class TestService:
         for idx, item in enumerate(questions):
             question_type = item["type"]
             correct_answer_text = str(item.get("correctAnswer", ""))
+            module_id = str(item.get("moduleId") or "").strip() or None
+            difficulty = float(item.get("difficulty", 0) or 0)
+            discrimination = float(item.get("discrimination", 1) or 1)
+            guessing = float(item.get("guessing", 0) or 0)
+            discrimination = discrimination if discrimination > 0 else 1.0
+            guessing = min(max(guessing, 0.0), 0.99)
             raw_question_id = item.get("id")
             q = None
             if raw_question_id:
@@ -285,6 +298,10 @@ class TestService:
                     points=float(item.get("points", 1) or 1),
                     correct_answer_text=correct_answer_text,
                     sort_order=idx,
+                    module_id=module_id,
+                    difficulty=difficulty,
+                    discrimination=discrimination,
+                    guessing=guessing,
                 )
                 if raw_question_id:
                     try:
@@ -297,6 +314,10 @@ class TestService:
                 q.points = float(item.get("points", 1) or 1)
                 q.correct_answer_text = correct_answer_text
                 q.sort_order = idx
+                q.module_id = module_id
+                q.difficulty = difficulty
+                q.discrimination = discrimination
+                q.guessing = guessing
 
             q.options = []
 
@@ -333,7 +354,8 @@ class TestService:
         test.questions = mapped_questions
 
     def _validate_rasch_configuration(self, scoring_type: str | ScoringType, questions: list[dict] | list[Question]) -> None:
-        if str(scoring_type) != ScoringType.RASCH.value:
+        normalized_scoring = str(scoring_type)
+        if normalized_scoring not in {ScoringType.RASCH.value, ScoringType.IRT.value}:
             return
 
         supported_types = {
@@ -357,12 +379,17 @@ class TestService:
                 two_part_points = question.get("twoPartPoints", [])
 
             if question_type not in supported_types:
+                detail = "Rasch tests faqat multiple-choice, true-false, two-part-written va two-part-math savollarni qo'llaydi"
+                if normalized_scoring == ScoringType.IRT.value:
+                    detail = "IRT tests faqat multiple-choice, true-false, two-part-written va two-part-math savollarni qo'llaydi"
                 raise HTTPException(
                     status_code=400,
-                    detail="Rasch tests faqat multiple-choice, true-false, two-part-written va two-part-math savollarni qo'llaydi",
+                    detail=detail,
                 )
 
             if question_type in {QuestionType.MULTIPLE_CHOICE, QuestionType.TRUE_FALSE} and abs(question_points - 1.0) > 1e-9:
+                if normalized_scoring == ScoringType.IRT.value:
+                    continue
                 raise HTTPException(
                     status_code=400,
                     detail="Rasch testsda multiple-choice va true-false savollar uchun ball 1 bo'lishi kerak",
@@ -373,10 +400,32 @@ class TestService:
                 while len(normalized) < 2:
                     normalized.append(1.0)
                 if any(abs(value - 1.0) > 1e-9 for value in normalized):
+                    if normalized_scoring == ScoringType.IRT.value:
+                        continue
                     raise HTTPException(
                         status_code=400,
                         detail="Rasch testsda two-part savol qismlarining har biri 1 ball bo'lishi kerak",
                     )
+
+    def _normalize_modules(self, modules: list[dict]) -> list[dict]:
+        normalized: list[dict] = []
+        for index, module in enumerate(modules or []):
+            module_id = str(module.get("id") or f"module-{index + 1}").strip()
+            if not module_id:
+                module_id = f"module-{index + 1}"
+            normalized.append(
+                {
+                    "id": module_id,
+                    "title": str(module.get("title") or f"Modul {index + 1}").strip(),
+                    "subject": str(module.get("subject") or "general").strip(),
+                    "difficulty": str(module.get("difficulty") or "medium").strip(),
+                    "durationMinutes": max(1, int(module.get("durationMinutes", 32) or 32)),
+                    "breakAfterMinutes": max(0, int(module.get("breakAfterMinutes", 0) or 0)),
+                    "questionCount": max(0, int(module.get("questionCount", 0) or 0)),
+                    "routing": str(module.get("routing") or "none").strip(),
+                }
+            )
+        return normalized
 
     def _decode_two_part_payload(self, raw: str) -> tuple[str, str, float, float]:
         try:

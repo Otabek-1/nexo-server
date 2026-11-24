@@ -15,6 +15,7 @@ class PlanCode(StrEnum):
 class ScoringType(StrEnum):
     CLASSIC = "correct-incorrect"
     RASCH = "rasch"
+    IRT = "irt"
 
 
 class TestType(StrEnum):

@@ -22,6 +22,10 @@ alembic upgrade head
 - Supabase storage uses S3-compatible settings (`S3_*` vars).
 - Auth: JWT access + refresh.
 - `scoringType=rasch` uses 1PL Rasch estimation (JML-style iterative fit) on objective items.
+- `scoringType=irt` uses a 2PL IRT/EAP model with configurable item difficulty (`b`), discrimination (`a`) and guessing (`c`) parameters.
+- Tests can include ordered modules with `durationMinutes`, `breakAfterMinutes`, subject and adaptive routing metadata.
+- IRT Reading and Writing / Math groups are mapped separately to 200-800 section scores and combined to an SAT-style 400-1600 total.
+- Module routing is a Nexo heuristic: at least 75% module accuracy routes to a harder next module; otherwise it routes to an easier module. This is not a claim that Nexo reproduces College Board's proprietary SAT routing algorithm.
 - If essay/short-answer questions exist, final score is composite:
   - Rasch objective component (0-100, weighted by objective points share)
   - Manual component (0-100, weighted by manual points share)

@@ -241,7 +241,7 @@ def two_part_part_results(question: Question, raw_answer: str | int | float) -> 
 
 
 def question_max_score(question: Question, scoring_type: ScoringType) -> float:
-    if scoring_type == ScoringType.RASCH or question.q_type == QuestionType.ESSAY:
+    if scoring_type in {ScoringType.RASCH, ScoringType.IRT} or question.q_type == QuestionType.ESSAY:
         if _is_two_part_question(question):
             _, _, first_points, second_points = _parse_two_part_correct(question.correct_answer_text)
             return first_points + second_points
@@ -261,7 +261,7 @@ def auto_score_submission(
 ) -> tuple[float, float, SubmissionStatus]:
     auto_score = 0.0
     auto_max = 0.0
-    requires_manual = scoring_type == ScoringType.RASCH
+    requires_manual = scoring_type in {ScoringType.RASCH, ScoringType.IRT}
 
     for q in questions:
         if q.q_type in {QuestionType.ESSAY, QuestionType.SHORT_ANSWER}:
@@ -270,7 +270,7 @@ def auto_score_submission(
         max_score = question_max_score(q, scoring_type)
         auto_max += max_score
         raw_answer = answers.get(str(q.id), "")
-        if _is_two_part_question(q) and scoring_type == ScoringType.RASCH:
+        if _is_two_part_question(q) and scoring_type in {ScoringType.RASCH, ScoringType.IRT}:
             is_first, is_second, first_points, second_points = two_part_part_results(q, raw_answer)
             if is_first:
                 auto_score += first_points

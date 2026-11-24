@@ -93,6 +93,7 @@ class Test(Base, TimestampMixin):
     test_type: Mapped[TestType] = mapped_column(Enum(TestType), default=TestType.EXAM, nullable=False)
     creator_plan_snapshot: Mapped[PlanCode] = mapped_column(Enum(PlanCode), default=PlanCode.FREE)
     status: Mapped[str] = mapped_column(String(32), default="active", nullable=False)
+    modules_json: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
 
     creator: Mapped["User"] = relationship(back_populates="tests")
     participant_fields: Mapped[list["ParticipantField"]] = relationship(
@@ -131,6 +132,10 @@ class Question(Base):
     points: Mapped[float] = mapped_column(Float, default=1, nullable=False)
     correct_answer_text: Mapped[str] = mapped_column(Text, default="", nullable=False)
     sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    module_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    difficulty: Mapped[float] = mapped_column(Float, default=0, nullable=False)
+    discrimination: Mapped[float] = mapped_column(Float, default=1, nullable=False)
+    guessing: Mapped[float] = mapped_column(Float, default=0, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
     )

@@ -137,6 +137,9 @@ def estimate_rasch_1pl(
         if max_change < tol:
             break
 
+    # Use empirical difficulties as a stable seed for the posterior when marginal
+    # updates push extreme items to the parameter bounds.
+    difficulties = _initial_item_difficulties(matrix)
     final_posterior = _posterior_by_submission(matrix, difficulties, nodes, weights)
 
     theta_by_submission: dict[UUID, float] = {}

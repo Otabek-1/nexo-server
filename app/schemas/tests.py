@@ -24,6 +24,10 @@ class QuestionIn(BaseModel):
     twoPartPoints: list[float] = Field(default_factory=list)
     points: float = 1
     correctAnswer: str
+    moduleId: str | None = None
+    difficulty: float = 0
+    discrimination: float = Field(default=1, gt=0)
+    guessing: float = Field(default=0, ge=0, lt=1)
 
     @field_validator("points")
     @classmethod
@@ -45,6 +49,7 @@ class TestDataIn(BaseModel):
     scoringType: ScoringType
     testType: TestType
     participantFields: list[ParticipantFieldIn]
+    modules: list[dict] = Field(default_factory=list)
 
 
 class TestCreateRequest(BaseModel):
@@ -81,6 +86,10 @@ class QuestionOut(BaseModel):
     twoPartPoints: list[float] = Field(default_factory=list)
     points: float
     correctAnswer: str
+    moduleId: str | None = None
+    difficulty: float = 0
+    discrimination: float = 1
+    guessing: float = 0
 
 
 class QuestionDetailOut(BaseModel):

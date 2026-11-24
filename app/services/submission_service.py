@@ -17,6 +17,7 @@ from app.repositories.registration_repository import RegistrationRepository
 from app.repositories.submission_repository import SubmissionRepository
 from app.services.plan_service import PlanService
 from app.services.rasch_service import estimate_rasch_1pl, summarize_rasch_items, theta_to_score_100
+from app.services.irt_service import estimate_2pl, theta_to_sat_section, theta_to_sat_total
 from app.services.scoring_service import (
     auto_score_submission,
     canonicalize_answers,
@@ -162,9 +163,9 @@ class SubmissionService:
         if not submission or submission.test_id != test_id:
             raise HTTPException(status_code=404, detail="Submission not found")
 
-        if test.scoring_type == ScoringType.RASCH:
+        if test.scoring_type in {ScoringType.RASCH, ScoringType.IRT}:
             if override is not None:
-                raise HTTPException(status_code=400, detail="Rasch final score override qo'llab-quvvatlanmaydi")
+                raise HTTPException(status_code=400, detail="IRT/Rasch final score override qo'llab-quvvatlanmaydi")
             await self._finalize_rasch_for_test(
                 test=test,
                 triggering_submission_id=submission_id,
@@ -396,7 +397,7 @@ class SubmissionService:
         return f"{plain[: max(limit - 1, 0)].rstrip()}…"
 
     async def _auto_finalize_rasch_if_ready(self, test: Test) -> None:
-        if test.scoring_type != ScoringType.RASCH:
+        if test.scoring_type not in {ScoringType.RASCH, ScoringType.IRT}:
             return
         if datetime.now(UTC) < test.end_time:
             return
@@ -478,17 +479,59 @@ class SubmissionService:
                     row_vector.append(1 if is_question_correct(q, ans) else 0)
             matrix.append(row_vector)
 
-        estimate = estimate_rasch_1pl(
-            submission_ids=submission_ids,
-            item_ids=item_ids,
-            matrix=matrix,
-        )
-
         now = datetime.now(UTC)
-        for row in all_rows:
-            theta = estimate.theta_by_submission.get(row.id, 0.0)
-            rasch_score = theta_to_score_100(theta)
-            row.final_score = round(rasch_score, 4)
-            row.status = SubmissionStatus.COMPLETED
-            row.reviewed_at = now
-            row.review_by = reviewer_id
+        if test.scoring_type == ScoringType.RASCH:
+            estimate = estimate_rasch_1pl(
+                submission_ids=submission_ids,
+                item_ids=item_ids,
+                matrix=matrix,
+            )
+            for row in all_rows:
+                theta = estimate.theta_by_submission.get(row.id, 0.0)
+                rasch_score = theta_to_score_100(theta)
+                row.final_score = round(rasch_score, 4)
+                row.status = SubmissionStatus.COMPLETED
+                row.reviewed_at = now
+                row.review_by = reviewer_id
+        else:
+            module_subject = {
+                str(module["id"]): str(module.get("subject") or "general")
+                for module in (test.modules_json or [])
+            }
+            subject_groups = {"reading-writing": [], "math": [], "general": []}
+            for item_index, item in enumerate(objective_items):
+                subject = module_subject.get(str(item["question"].module_id), "general")
+                subject_groups.setdefault(subject, []).append(item_index)
+
+            subject_thetas: dict[str, dict[UUID, float]] = {}
+            for subject, item_indexes in subject_groups.items():
+                if not item_indexes:
+                    continue
+                subject_matrix = [[row[item_index] for item_index in item_indexes] for row in matrix]
+                subject_items = [objective_items[item_index] for item_index in item_indexes]
+                subject_difficulties = [float(item["question"].difficulty or 0) for item in subject_items]
+                subject_discriminations = [float(item["question"].discrimination or 1) for item in subject_items]
+                subject_guessing = [float(item["question"].guessing or 0) for item in subject_items]
+                subject_estimate = estimate_2pl(
+                    submission_ids=submission_ids,
+                    item_ids=[item_ids[item_index] for item_index in item_indexes],
+                    matrix=subject_matrix,
+                    difficulties=subject_difficulties,
+                    discriminations=subject_discriminations,
+                    guessing=subject_guessing,
+                )
+                subject_thetas[subject] = subject_estimate.theta_by_submission
+
+            for row in all_rows:
+                theta_reading = subject_thetas.get("reading-writing", {}).get(row.id)
+                theta_math = subject_thetas.get("math", {}).get(row.id)
+                general = subject_thetas.get("general", {}).get(row.id)
+                if theta_reading is not None and theta_math is not None:
+                    row.final_score = float(theta_to_sat_total(theta_reading, theta_math))
+                elif theta_reading is not None:
+                    row.final_score = float(theta_to_sat_section(theta_reading) + 200)
+                elif theta_math is not None:
+                    row.final_score = float(200 + theta_to_sat_section(theta_math))
+                else:
+                    theta = general if general is not None else 0.0
+                    row.final_score = float(theta_to_sat_section(theta) + theta_to_sat_section(theta))
