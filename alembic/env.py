@@ -2,6 +2,7 @@ import asyncio
 from logging.config import fileConfig
 from uuid import uuid4
 
+from alembic.script import ScriptDirectory
 from sqlalchemy.engine import Connection, make_url
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.pool import NullPool
@@ -9,6 +10,7 @@ from sqlalchemy.pool import NullPool
 from alembic import context
 from app.core.config import get_settings
 from app.db.base import Base
+from app.db.migration_bootstrap import LEGACY_BASELINE_REVISION, has_unversioned_legacy_schema
 from app.models import *
 
 config = context.config
@@ -51,6 +53,15 @@ def run_migrations_offline() -> None:
 def do_run_migrations(connection: Connection) -> None:
     context.configure(connection=connection, target_metadata=target_metadata)
     with context.begin_transaction():
+        migration_context = context.get_context()
+        if (
+            migration_context.get_current_revision() is None
+            and has_unversioned_legacy_schema(connection)
+        ):
+            migration_context.stamp(
+                ScriptDirectory.from_config(config),
+                LEGACY_BASELINE_REVISION,
+            )
         context.run_migrations()
 
 

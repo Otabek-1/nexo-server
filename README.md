@@ -16,6 +16,8 @@ Frontend env (`client/.env`): `VITE_API_BASE_URL=http://localhost:8000/api/v1`
 alembic upgrade head
 ```
 
+For databases created before Alembic version tracking, startup safely recognizes a complete schema through revision `20260409_0004`, records that baseline, and applies later migrations. It does not stamp incomplete or newer schemas.
+
 After deploying backend changes that add database enum values or columns, run this command against the production database before creating tests that use those changes.
 
 ## Notes
